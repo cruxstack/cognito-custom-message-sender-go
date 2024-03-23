@@ -15,11 +15,6 @@ var (
 )
 
 func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailSender) error {
-	log.Debug("Received event", "event.TriggerSource", event.TriggerSource)
-	log.Debug("received event", "event.Request.Type", event.Request.Type)
-	log.Debug("received event", "event.Request.UsernameParameter[email]", event.Request.UserAttributes["email"])
-	log.Debug("received event", "event.UserName", event.UserName)
-
 	err := sender.SendEmail(ctx, event, &cfg, dryRun)
 	if err != nil {
 		log.Error("failed to send email", "error", err)
