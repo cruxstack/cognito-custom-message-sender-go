@@ -23,12 +23,6 @@ RUN apt update && apt install -y \
     wget \
     xxd
 
-# install go
-ARG GOLANG_VERSION=1.22.1
-RUN SYSTEM_ARCH=$(dpkg --print-architecture) \
-    && curl -sL "https://go.dev/dl/go${GOLANG_VERSION}.linux-${SYSTEM_ARCH}.tar.gz" | tar -C /usr/local -xzf - \
-    && /usr/local/go/bin/go install -v golang.org/x/tools/gopls@latest
-
 # install aws
 RUN SYSTEM_ARCH=$(uname -m) \
     && curl "https://awscli.amazonaws.com/awscli-exe-linux-${SYSTEM_ARCH}-2.13.33.zip" -o "awscliv2.zip" \
