@@ -3,3 +3,5 @@ tmp
 Archive*.zip
 main
 cli
+.integration
+.env
