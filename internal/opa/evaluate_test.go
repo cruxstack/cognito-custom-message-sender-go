@@ -30,17 +30,17 @@ func TestEvaluatePolicy(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		data     map[string]interface{}
+		data     map[string]any
 		expected bool
 	}{
 		{
 			name:     "allow admin user",
-			data:     map[string]interface{}{"user": "admin"},
+			data:     map[string]any{"user": "admin"},
 			expected: true,
 		},
 		{
 			name:     "deny non-admin user",
-			data:     map[string]interface{}{"user": "guest"},
+			data:     map[string]any{"user": "guest"},
 			expected: false,
 		},
 	}

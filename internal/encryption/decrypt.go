@@ -13,6 +13,11 @@ import (
 )
 
 func Decrypt(ctx context.Context, kmsId, encryptedText string) (string, error) {
+	// mock the decryption for testing
+	if kmsId == "MOCKED_KEY_ID" {
+		return encryptedText, nil
+	}
+
 	cfg, err := clientconfig.NewConfigWithOpts(
 		clientconfig.WithCommitmentPolicy(suite.CommitmentPolicyForbidEncryptAllowDecrypt),
 	)
