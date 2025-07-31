@@ -16,7 +16,7 @@ var (
 )
 
 func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailSender) error {
-	if dryRun {
+	if os.Getenv("DEBUG_MODE") == "true" {
 		evtJson, err := json.Marshal(event)
 		if err != nil {
 			log.Error("issue marshalling event: %v", err)
