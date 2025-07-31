@@ -16,13 +16,15 @@ var (
 )
 
 func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailSender) error {
-	evtJson, err := json.Marshal(event)
-	if err != nil {
-		log.Error("issue marshalling event: %v", err)
+	if dryRun {
+		evtJson, err := json.Marshal(event)
+		if err != nil {
+			log.Error("issue marshalling event: %v", err)
+		}
+		log.Print(string(evtJson))
 	}
-	log.Print(string(evtJson))
 
-	err = sender.SendEmail(ctx, event, &cfg, dryRun)
+	err := sender.SendEmail(ctx, event, &cfg, dryRun)
 	if err != nil {
 		log.Error("failed to send email", "error", err)
 		return err
