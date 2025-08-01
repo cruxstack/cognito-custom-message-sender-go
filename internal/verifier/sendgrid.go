@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/mail"
+	"slices"
+	"strings"
 
+	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/sendgrid/sendgrid-go"
 )
@@ -23,11 +27,48 @@ type SendGridEmailEmailAddressValidationResponse struct {
 }
 
 type SendGridEmailVerifier struct {
-	APIHost string
-	APIKey  string
+	Allowlist []string
+	APIHost   string
+	APIKey    string
 }
 
 func (v *SendGridEmailVerifier) VerifyEmail(ctx context.Context, email string) (*EmailVerificationResult, error) {
+	result, _ := v.VerifyEmailViaAllowlist(ctx, email)
+	if result != nil {
+		log.Debug("email domain was on allowlist", "email", email)
+		return result, nil
+	}
+	return v.VerifyEmailViaAPI(ctx, email)
+}
+
+func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, email string) (*EmailVerificationResult, error) {
+	addr, err := mail.ParseAddress(email)
+	if err != nil {
+		return nil, nil // invalid email format
+	}
+
+	at := strings.LastIndex(addr.Address, "@")
+	if at == -1 || at == len(addr.Address)-1 {
+		return nil, nil // no domain part
+	}
+
+	domain := addr.Address[at+1:]
+	whitelisted := slices.Contains(v.Allowlist, domain)
+
+	if !whitelisted {
+		return nil, nil
+	}
+
+	return &EmailVerificationResult{
+		Score:        100.0,
+		IsValid:      true,
+		IsDisposable: false,
+		IsRoleBased:  false,
+		Raw:          "{}",
+	}, nil
+}
+
+func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	request := sendgrid.GetRequest(v.APIKey, "/v3/validations/email", v.APIHost)
 	request.Body = fmt.Appendf(request.Body, `{"email":"%s","source":"cognito"}`, email)
 	request.Method = "POST"
@@ -54,7 +95,8 @@ func (v *SendGridEmailVerifier) VerifyEmail(ctx context.Context, email string) (
 
 func NewSendGridVerifier(cfg *config.Config) (*SendGridEmailVerifier, error) {
 	return &SendGridEmailVerifier{
-		APIHost: cfg.SendGridApiHost,
-		APIKey:  cfg.SendGridApiKey,
+		Allowlist: cfg.SendGridEmailVerificationAllowlist,
+		APIHost:   cfg.SendGridApiHost,
+		APIKey:    cfg.SendGridApiKey,
 	}, nil
 }

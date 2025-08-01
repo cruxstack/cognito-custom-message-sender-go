@@ -23,17 +23,18 @@ credentials or addresses.
 
 Configure your Lambda or local environment via environment variables:
 
-| Variable                              | Description                                                               | Default                           |
-| ------------------------------------- | ------------------------------------------------------------------------- | --------------------------------- |
-| `APP_DEBUG_MODE`                      | `true` to enable debug mode (loads `.env`, mocks KMS and dry-run).        | `false`                           |
-| `APP_DEBUG_DATA_PATH`                 | Path to JSON file containing array of Cognito event samples (for debug).  | `fixtures/debug-data.json`        |
-| `APP_EMAIL_SENDER_POLICY_PATH`        | Path or S3 URI to the Rego policy file used by OPA.                       | **required**                      |
-| `APP_KMS_KEY_ID`                      | KMS key ID for decrypting the Cognito code.                               | **required**                      |
-| `APP_LOG_LEVEL`                       | Log level (`debug`, `info`, `warn`, `error`).                             | `info`                            |
-| `APP_SEND_ENABLED`                    | `true` to send via SES, `false` to dry-run.                               | `true`                            |
-| `SENDGRID_API_KEY`                    | SendGrid API key for email verification.                                  | **required if enabling SendGrid** |
-| `SENDGRID_API_HOST`                   | Base URL for SendGrid API.                                                | `https://api.sendgrid.com`        |
-| `SENDGRID_EMAIL_VERIFICATION_ENABLED` | `true` to include SendGrid verification in policy input, `false` to skip. | `false`                           |
+| Variable                                    | Description                                                               | Default                           |
+| ------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------- |
+| `APP_DEBUG_MODE`                            | `true` to enable debug mode (loads `.env`, mocks KMS and dry-run).        | `false`                           |
+| `APP_DEBUG_DATA_PATH`                       | Path to JSON file containing array of Cognito event samples (for debug).  | `fixtures/debug-data.json`        |
+| `APP_EMAIL_SENDER_POLICY_PATH`              | Path or S3 URI to the Rego policy file used by OPA.                       | **required**                      |
+| `APP_KMS_KEY_ID`                            | KMS key ID for decrypting the Cognito code.                               | **required**                      |
+| `APP_LOG_LEVEL`                             | Log level (`debug`, `info`, `warn`, `error`).                             | `info`                            |
+| `APP_SEND_ENABLED`                          | `true` to send via SES, `false` to dry-run.                               | `true`                            |
+| `APP_SENDGRID_API_KEY`                      | SendGrid API key for email verification.                                  | **required if enabling SendGrid** |
+| `APP_SENDGRID_API_HOST`                     | Base URL for SendGrid API.                                                | `https://api.sendgrid.com`        |
+| `APP_SENDGRID_EMAIL_VERIFICATION_ALLOWLIST` | List of email domains that automatically is validated as valid            | `""`                              |
+| `APP_SENDGRID_EMAIL_VERIFICATION_ENABLED`   | `true` to include SendGrid verification in policy input, `false` to skip. | `false`                           |
 
 > **Note:** `APP_SEND_ENABLED` is automatically set to `false` in debug mode unless explicitly overridden.
 
@@ -47,9 +48,9 @@ role-based emails.
 
 To include SendGrid verification results as input to your OPA policy:
 
-1. Set `SENDGRID_EMAIL_VERIFICATION_ENABLED=true`.
-2. Provide `SENDGRID_API_KEY` via environment. Optionally override host with
-   `SENDGRID_API_HOST`.
+1. Set `APP_SENDGRID_EMAIL_VERIFICATION_ENABLED=true`.
+2. Provide `APP_SENDGRID_API_KEY` via environment. Optionally override host with
+   `APP_SENDGRID_API_HOST`.
 3. In your Rego policy, reference `input.emailVerification` fields (`valid`,
    `score`, `role`, `raw`).
 

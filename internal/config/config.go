@@ -2,33 +2,36 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/log"
 )
 
 type Config struct {
-	AppLogLevel                      log.Level
-	AppKmsKeyId                      string
-	AppEmailSenderPolicyPath         string
-	DebugMode                        bool
-	DebugDataPath                    string
-	AppSendEnabled                   bool
-	SendGridApiHost                  string
-	SendGridEmailVerificationEnabled bool
-	SendGridApiKey                   string
+	AppLogLevel                        log.Level
+	AppKmsKeyId                        string
+	AppEmailSenderPolicyPath           string
+	DebugMode                          bool
+	DebugDataPath                      string
+	AppSendEnabled                     bool
+	SendGridApiHost                    string
+	SendGridEmailVerificationEnabled   bool
+	SendGridEmailVerificationAllowlist []string
+	SendGridApiKey                     string
 }
 
 func New() (*Config, error) {
 	cfg := Config{
-		DebugMode:                        os.Getenv("APP_DEBUG_MODE") == "true",
-		DebugDataPath:                    os.Getenv("APP_DEBUG_DATA_PATH"),
-		AppKmsKeyId:                      os.Getenv("APP_KMS_KEY_ID"),
-		AppLogLevel:                      log.InfoLevel,
-		AppEmailSenderPolicyPath:         os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
-		AppSendEnabled:                   true,
-		SendGridApiKey:                   os.Getenv("APP_SENDGRID_API_KEY"),
-		SendGridApiHost:                  os.Getenv("APP_SENDGRID_API_HOST"),
-		SendGridEmailVerificationEnabled: os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ENABLED") == "true",
+		DebugMode:                          os.Getenv("APP_DEBUG_MODE") == "true",
+		DebugDataPath:                      os.Getenv("APP_DEBUG_DATA_PATH"),
+		AppKmsKeyId:                        os.Getenv("APP_KMS_KEY_ID"),
+		AppLogLevel:                        log.InfoLevel,
+		AppEmailSenderPolicyPath:           os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
+		AppSendEnabled:                     true,
+		SendGridApiKey:                     os.Getenv("APP_SENDGRID_API_KEY"),
+		SendGridApiHost:                    os.Getenv("APP_SENDGRID_API_HOST"),
+		SendGridEmailVerificationAllowlist: []string{},
+		SendGridEmailVerificationEnabled:   os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ENABLED") == "true",
 	}
 
 	// disable send if debug mode by default
@@ -39,6 +42,15 @@ func New() (*Config, error) {
 	logLevel, err := log.ParseLevel(os.Getenv("APP_LOG_LEVEL"))
 	if err == nil {
 		cfg.AppLogLevel = logLevel
+	}
+
+	allowlistStr := strings.TrimSpace(os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ALLOWLIST"))
+	if allowlistStr != "" {
+		allowlist := strings.Split(allowlistStr, ",")
+		for i, x := range allowlist {
+			allowlist[i] = strings.TrimSpace(x)
+		}
+		cfg.SendGridEmailVerificationAllowlist = allowlist
 	}
 
 	if cfg.SendGridApiHost == "" {
