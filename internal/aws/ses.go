@@ -19,7 +19,7 @@ func NewSESClient(cfg aws.Config) *SESClient {
 	return &SESClient{Client: ses.NewFromConfig(cfg)}
 }
 
-func (c *SESClient) SendEmail(ctx context.Context, templateID string, templateData map[string]interface{}, srcAddress, dstAddress string, dryRun bool) error {
+func (c *SESClient) SendEmail(ctx context.Context, templateID string, templateData map[string]any, srcAddress, dstAddress string, dryRun bool) error {
 	templateDataJSON, err := json.Marshal(templateData)
 	if err != nil {
 		return fmt.Errorf("error marshaling template data: %w", err)

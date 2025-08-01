@@ -1,7 +1,12 @@
-tmp
+!**/.gitkeep
+
+tmp/
 .DS_Store
-Archive*.zip
+
+.local/
+.env
+
+cognito-custom-message-sender-go
 main
 cli
-.integration
-.env
+

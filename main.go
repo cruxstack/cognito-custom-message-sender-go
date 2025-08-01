@@ -3,19 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/charmbracelet/log"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
 )
 
 var (
-	cfg    sender.SenderConfig
-	dryRun bool
+	s *sender.Sender
 )
 
-func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailSender) error {
+func Handler(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSender) error {
 	if os.Getenv("DEBUG_MODE") == "true" {
 		evtJson, err := json.Marshal(event)
 		if err != nil {
@@ -24,7 +26,7 @@ func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailS
 		log.Print(string(evtJson))
 	}
 
-	err := sender.SendEmail(ctx, event, &cfg, dryRun)
+	err := s.SendEmail(ctx, event)
 	if err != nil {
 		log.Error("failed to send email", "error", err)
 		return err
@@ -34,15 +36,18 @@ func Handler(ctx context.Context, event sender.CognitoEventUserPoolsCustomEmailS
 }
 
 func main() {
-	logLevel, _ := log.ParseLevel(os.Getenv("LOG_LEVEL"))
-	log.SetLevel(logLevel)
-
-	cfg = sender.SenderConfig{
-		KMSKeyID:   os.Getenv("KMS_KEY_ID"),
-		PolicyPath: os.Getenv("EMAIL_SENDER_POLICY_PATH"),
+	cfg, err := config.New()
+	if err != nil {
+		fmt.Printf("configuration error: %s", err)
+		os.Exit(1)
 	}
+	log.SetLevel(cfg.AppLogLevel)
 
-	dryRun = os.Getenv("DRY_RUN") == "true"
+	s, err = sender.NewSender(context.Background(), cfg)
+	if err != nil {
+		fmt.Printf("sender init error: %s", err)
+		os.Exit(1)
+	}
 
 	lambda.Start(Handler)
 }

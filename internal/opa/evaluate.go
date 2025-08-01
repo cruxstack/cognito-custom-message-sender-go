@@ -8,7 +8,7 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 )
 
-func EvaluatePolicy(ctx context.Context, policyPath string, data interface{}) (map[string]interface{}, error) {
+func EvaluatePolicy(ctx context.Context, policyPath string, data any) (map[string]any, error) {
 	policy, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read policy file: %w", err)
@@ -31,7 +31,7 @@ func EvaluatePolicy(ctx context.Context, policyPath string, data interface{}) (m
 		return nil, fmt.Errorf("no results found during policy evaluation")
 	}
 
-	output, ok := results[0].Expressions[0].Value.(map[string]interface{})
+	output, ok := results[0].Expressions[0].Value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("failed to convert result from policy to map: %v", results[0].Expressions[0].Value)
 	}

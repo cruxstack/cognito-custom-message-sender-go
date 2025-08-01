@@ -1,0 +1,80 @@
+[
+{
+    "version": "1",
+    "triggerSource": "CustomEmailSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_abcd12345",
+    "callerContext": {
+        "awsSdkVersion": "aws-sdk-unknown-unknown",
+        "clientId": "xxxxxxxxxxxxxxxxxxxxxx0000"
+    },
+    "userName": "emma@example.org",
+    "request": {
+        "userAttributes": {
+            "cognito:user_status": "UNCONFIRMED",
+            "email": "emma@example.org",
+            "email_verified": "false",
+            "sub": "00000000-aaaa-0000-aaaa-000000000000"
+        },
+        "code": "123456",
+        "clientMetadata": null,
+        "type": "customEmailSenderRequestV1"
+    },
+    "response": {
+        "emailMessage": "",
+        "emailSubject": ""
+    }
+},
+{
+    "version": "1",
+    "triggerSource": "CustomEmailSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_abcd12345",
+    "callerContext": {
+        "awsSdkVersion": "aws-sdk-unknown-unknown",
+        "clientId": "xxxxxxxxxxxxxxxxxxxxxx1111"
+    },
+    "userName": "eli@example.org",
+    "request": {
+        "userAttributes": {
+            "cognito:user_status": "UNCONFIRMED",
+            "email": "eli@example.org",
+            "email_verified": "false",
+            "sub": "11111111-aaaa-1111-aaaa-111111111111"
+        },
+        "code": "234567",
+        "clientMetadata": null,
+        "type": "customEmailSenderRequestV1"
+    },
+    "response": {
+        "emailMessage": "",
+        "emailSubject": ""
+    }
+},
+{
+    "version": "1",
+    "triggerSource": "CustomEmailSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_abcd234567",
+    "callerContext": {
+        "awsSdkVersion": "aws-sdk-unknown-unknown",
+        "clientId": "xxxxxxxxxxxxxxxxxxxxxx2222"
+    },
+    "userName": "ella@example.org1",
+    "request": {
+        "userAttributes": {
+            "cognito:user_status": "UNCONFIRMED",
+            "email": "ella@example.org1",
+            "email_verified": "false",
+            "sub": "22222222-aaaa-2222-aaaa-222222222222"
+        },
+        "code": "123456",
+        "clientMetadata": null,
+        "type": "customEmailSenderRequestV1"
+    },
+    "response": {
+        "emailMessage": "",
+        "emailSubject": ""
+    }
+}
+  ]
