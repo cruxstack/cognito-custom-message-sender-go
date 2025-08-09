@@ -6,7 +6,7 @@
     "userPoolId": "us-east-1_abcd12345",
     "callerContext": {
         "awsSdkVersion": "aws-sdk-unknown-unknown",
-        "clientId": "xxxxxxxxxxxxxxxxxxxxxx0000"
+        "clientId": "xxxx0000"
     },
     "userName": "emma@example.org",
     "request": {
@@ -32,7 +32,7 @@
     "userPoolId": "us-east-1_abcd12345",
     "callerContext": {
         "awsSdkVersion": "aws-sdk-unknown-unknown",
-        "clientId": "xxxxxxxxxxxxxxxxxxxxxx1111"
+        "clientId": "xxxx1111"
     },
     "userName": "eli@example.org",
     "request": {
@@ -58,7 +58,7 @@
     "userPoolId": "us-east-1_abcd234567",
     "callerContext": {
         "awsSdkVersion": "aws-sdk-unknown-unknown",
-        "clientId": "xxxxxxxxxxxxxxxxxxxxxx2222"
+        "clientId": "xxxx2222"
     },
     "userName": "ella@example.org1",
     "request": {

@@ -3,7 +3,10 @@
 A flexible AWS Lambda–based solution to send policy-driven emails in response
 to AWS Cognito events. It supports SES for delivery, optional SendGrid email
 verification, and a local debug mode for integration testing without real
-credentials or addresses.
+credentials or addresses. As an example, share a single userpool between
+multiple sites and-or apps, but send specific emails (ses templates) that match
+the respective site or app by returning different template-id based on the
+caller's client-id.
 
 ## Features
 
@@ -91,6 +94,10 @@ The Rego policy receives a single `input` object with the following shape:
 ```jsonc
 {
   "trigger": "CustomEmailSender_SignUp",
+  "callerContext": {
+    "awsSdkVersion": "aws-sdk-unknown-unknown",
+    "clientId": "xxxxxxxxxxxxxxxxxx"
+  }
   "userAttributes": {
     "email": "user@example.org",
     "email_verified": "false",

@@ -1,12 +1,16 @@
 package sender
 
-import "github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
+import (
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
+)
 
 type PolicyInput struct {
-	Trigger           string                            `json:"trigger"`
-	UserAttributes    map[string]any                    `json:"userAttributes"`
-	ClientMetadata    map[string]string                 `json:"clientMetadata"`
-	EmailVerification *verifier.EmailVerificationResult `json:"emailVerification,omitempty"`
+	Trigger           string                                    `json:"trigger"`
+	CallerContext     events.CognitoEventUserPoolsCallerContext `json:"callerContext"`
+	UserAttributes    map[string]any                            `json:"userAttributes"`
+	ClientMetadata    map[string]string                         `json:"clientMetadata"`
+	EmailVerification *verifier.EmailVerificationResult         `json:"emailVerification,omitempty"`
 }
 
 type PolicyOutput struct {
