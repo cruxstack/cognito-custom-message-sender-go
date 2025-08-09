@@ -90,6 +90,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 	policyInput := PolicyInput{
 		Trigger:           event.TriggerSource,
+		CallerContext:     event.CallerContext,
 		UserAttributes:    event.Request.UserAttributes,
 		ClientMetadata:    event.Request.ClientMetadata,
 		EmailVerification: verificationData,
