@@ -15,7 +15,8 @@ type PolicyInput struct {
 
 type PolicyOutput struct {
 	Action string    `json:"action"`
-	Allow  EmailData `json:"allow"`
+	Reason string    `json:"reason,omitempty"`
+	Allow  EmailData `json:"allow,omitempty"`
 }
 
 type EmailData struct {
