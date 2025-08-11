@@ -96,30 +96,22 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 		EmailVerification: verificationData,
 	}
 
-	result, err := opa.EvaluatePolicy(ctx, s.Config.AppEmailSenderPolicyPath, policyInput)
+	output, err := opa.EvaluatePolicy[PolicyOutput](ctx, s.Config.AppEmailSenderPolicyPath, policyInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate policy: %w", err)
 	}
 
-	action, ok := result["action"].(string)
-	if !ok {
+	if output.Action == "" {
 		return nil, errors.New("desired action missing")
 	}
 
-	if action != "allow" {
+	if output.Action != "allow" {
 		email, _ := event.Request.UserAttributes["email"].(string)
-		reason, _ := result["reason"].(string)
-
-		log.Info("ignoring send request", "email", email, "reason", reason)
+		log.Info("ignoring send request", "email", email, "reason", output.Reason)
 		return nil, nil
 	}
 
-	allow, ok := result["allow"].(map[string]any)
-	if !ok {
-		return nil, errors.New("invalid format for 'allow' in policy result")
-	}
-
-	emailData, err := s.ParseEmailData(allow)
+	emailData, err := s.ParseEmailData(&output.Allow)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse email data: %w", err)
 	}
@@ -127,28 +119,24 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 	return &emailData, nil
 }
 
-func (s *Sender) ParseEmailData(data map[string]any) (EmailData, error) {
-	dstAddress, ok := data["dstAddress"].(string)
-	if !ok {
+func (s *Sender) ParseEmailData(data *EmailData) (EmailData, error) {
+	if data.DestinationAddress == "" {
 		return EmailData{}, errors.New("destination address missing or invalid")
 	}
-	srcAddress, ok := data["srcAddress"].(string)
-	if !ok {
+	if data.SourceAddress == "" {
 		return EmailData{}, errors.New("source address missing or invalid")
 	}
-	templateID, ok := data["templateID"].(string)
-	if !ok {
+	if data.TemplateID == "" {
 		return EmailData{}, errors.New("template ID missing or invalid")
 	}
-	templateData, ok := data["templateData"].(map[string]any)
-	if !ok {
-		return EmailData{}, errors.New("template data missing or invalid")
+	if data.TemplateData == nil {
+		data.TemplateData = make(map[string]any)
 	}
 
 	return EmailData{
-		DestinationAddress: dstAddress,
-		SourceAddress:      srcAddress,
-		TemplateID:         templateID,
-		TemplateData:       templateData,
+		DestinationAddress: data.DestinationAddress,
+		SourceAddress:      data.SourceAddress,
+		TemplateID:         data.TemplateID,
+		TemplateData:       data.TemplateData,
 	}, nil
 }

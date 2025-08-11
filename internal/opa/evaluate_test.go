@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+type TestPolicyOutput struct {
+	IsAdmin bool `json:"isAdmin,omitempty"`
+}
+
 func TestEvaluatePolicy(t *testing.T) {
 	policyFile, err := os.CreateTemp("", "test-policy-*.rego")
 	if err != nil {
@@ -49,12 +53,11 @@ func TestEvaluatePolicy(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := EvaluatePolicy(ctx, policyFile.Name(), tc.data)
+			result, err := EvaluatePolicy[TestPolicyOutput](ctx, policyFile.Name(), tc.data)
 			if err != nil {
 				t.Fatal(err)
 			}
-			isAdmin, ok := result["isAdmin"].(bool)
-			if !ok || isAdmin != tc.expected {
+			if result.IsAdmin != tc.expected {
 				t.Errorf("Test case %s failed: expected %v but got %v", tc.name, tc.expected, result)
 			}
 		})

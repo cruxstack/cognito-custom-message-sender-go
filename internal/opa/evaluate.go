@@ -2,13 +2,14 @@ package opa
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/open-policy-agent/opa/rego"
 )
 
-func EvaluatePolicy(ctx context.Context, policyPath string, data any) (map[string]any, error) {
+func EvaluatePolicy[T any](ctx context.Context, policyPath string, data any) (*T, error) {
 	policy, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read policy file: %w", err)
@@ -31,10 +32,16 @@ func EvaluatePolicy(ctx context.Context, policyPath string, data any) (map[strin
 		return nil, fmt.Errorf("no results found during policy evaluation")
 	}
 
-	output, ok := results[0].Expressions[0].Value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("failed to convert result from policy to map: %v", results[0].Expressions[0].Value)
+	raw := results[0].Expressions[0].Value
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal policy result: %w", err)
 	}
 
-	return output, nil
+	var output T
+	if err := json.Unmarshal(b, &output); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal policy result: %w", err)
+	}
+
+	return &output, nil
 }
