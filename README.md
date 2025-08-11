@@ -97,7 +97,7 @@ The Rego policy receives a single `input` object with the following shape:
   "callerContext": {
     "awsSdkVersion": "aws-sdk-unknown-unknown",
     "clientId": "xxxxxxxxxxxxxxxxxx"
-  }
+  },
   "userAttributes": {
     "email": "user@example.org",
     "email_verified": "false",
