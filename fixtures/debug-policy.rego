@@ -27,12 +27,16 @@ result := allow_result {
 allow_result := {
   "action": "allow",
   "allow": {
-    "templateID": template_id,
-    "templateData": {
-      "clientId": input.callerContext.clientId
-    },
     "srcAddress": "ACME <noreply@example.org>",
-    "dstAddress": input.userAttributes.email
+    "dstAddress": input.userAttributes.email,
+    "providers": {
+      "ses": {
+        "templateId": template_id,
+        "templateData": {
+          "clientId": input.callerContext.clientId
+        }
+      }
+    }
   }
 }
 

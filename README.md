@@ -131,16 +131,21 @@ with the following shape:
 
 * Allow example:
 
-```json
+```jsonc
 {
   "action": "allow",
   "allow": {
-    "templateID": "your-ses-template-id",
-    "templateData": {
-      "code": "123456"
-    },
     "srcAddress": "noreply@example.org",
-    "dstAddress": "user@example.org"
+    "dstAddress": "user@example.org",
+    "providers": {
+      // email provider specific data
+      "ses": {
+        "templateId": "your-ses-template-id",
+        "templateData": {
+          "code": "123456"
+        }
+      }
+    }
   }
 }
 ```
