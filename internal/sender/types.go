@@ -2,6 +2,7 @@ package sender
 
 import (
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
 )
 
@@ -14,14 +15,7 @@ type PolicyInput struct {
 }
 
 type PolicyOutput struct {
-	Action string    `json:"action"`
-	Reason string    `json:"reason,omitempty"`
-	Allow  EmailData `json:"allow,omitempty"`
-}
-
-type EmailData struct {
-	DestinationAddress string         `json:"dstAddress"`
-	SourceAddress      string         `json:"srcAddress"`
-	TemplateID         string         `json:"templateID"`
-	TemplateData       map[string]any `json:"templateData"`
+	Action string          `json:"action"`
+	Reason string          `json:"reason,omitempty"`
+	Allow  types.EmailData `json:"allow,omitempty"`
 }

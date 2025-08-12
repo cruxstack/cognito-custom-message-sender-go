@@ -1,19 +1,24 @@
 package config
 
 import (
+	"context"
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/charmbracelet/log"
 )
 
 type Config struct {
+	AWSConfig                          *aws.Config
 	AppLogLevel                        log.Level
 	AppKmsKeyId                        string
+	AppEmailProvider                   string
 	AppEmailSenderPolicyPath           string
+	AppSendEnabled                     bool
 	DebugMode                          bool
 	DebugDataPath                      string
-	AppSendEnabled                     bool
 	SendGridApiHost                    string
 	SendGridEmailVerificationEnabled   bool
 	SendGridEmailVerificationAllowlist []string
@@ -21,11 +26,18 @@ type Config struct {
 }
 
 func New() (*Config, error) {
+	awscfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := Config{
 		DebugMode:                          os.Getenv("APP_DEBUG_MODE") == "true",
 		DebugDataPath:                      os.Getenv("APP_DEBUG_DATA_PATH"),
+		AWSConfig:                          &awscfg,
 		AppKmsKeyId:                        os.Getenv("APP_KMS_KEY_ID"),
 		AppLogLevel:                        log.InfoLevel,
+		AppEmailProvider:                   "ses",
 		AppEmailSenderPolicyPath:           os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
 		AppSendEnabled:                     true,
 		SendGridApiKey:                     os.Getenv("APP_SENDGRID_API_KEY"),

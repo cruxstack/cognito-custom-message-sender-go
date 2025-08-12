@@ -10,14 +10,16 @@ import (
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/opa"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/providers"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
 )
 
 type Sender struct {
 	Config        *config.Config
-	SES           *aws.SESClient
 	KMS           *aws.KMSClient
 	EmailVerifier verifier.EmailVerifier
+	Provider      providers.Provider
 }
 
 func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
@@ -31,10 +33,15 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		return nil, fmt.Errorf("sendgrid init error: %s\n", err)
 	}
 
+	p, err := providers.NewProvider(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create email provider: %w", err)
+	}
+
 	return &Sender{
 		Config:        cfg,
 		KMS:           aws.KMS,
-		SES:           aws.SES,
+		Provider:      p,
 		EmailVerifier: verifier,
 	}, nil
 }
@@ -54,9 +61,9 @@ func (s *Sender) SendEmail(ctx context.Context, event aws.CognitoEventUserPoolsC
 		return nil
 	}
 
-	templateData := s.MergeTemplateData(data.TemplateData, map[string]any{"code": code})
+	data.TemplateData = s.MergeTemplateData(data.TemplateData, map[string]any{"code": code})
 
-	err = s.SES.SendEmail(ctx, data.TemplateID, templateData, data.SourceAddress, data.DestinationAddress, !s.Config.AppSendEnabled)
+	err = s.Provider.Send(ctx, data)
 	if err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
@@ -65,6 +72,9 @@ func (s *Sender) SendEmail(ctx context.Context, event aws.CognitoEventUserPoolsC
 }
 
 func (s *Sender) MergeTemplateData(base, additional map[string]any) map[string]any {
+	if base == nil {
+		base = make(map[string]any)
+	}
 	for k, v := range additional {
 		base[k] = v
 	}
@@ -72,7 +82,7 @@ func (s *Sender) MergeTemplateData(base, additional map[string]any) map[string]a
 }
 
 // GetEmailData retrieves the email data based on a policy evaluation.
-func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSender) (*EmailData, error) {
+func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSender) (*types.EmailData, error) {
 	var verificationData *verifier.EmailVerificationResult
 	var err error
 
@@ -116,27 +126,22 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 		return nil, fmt.Errorf("failed to parse email data: %w", err)
 	}
 
-	return &emailData, nil
+	return emailData, nil
 }
 
-func (s *Sender) ParseEmailData(data *EmailData) (EmailData, error) {
+func (s *Sender) ParseEmailData(data *types.EmailData) (*types.EmailData, error) {
 	if data.DestinationAddress == "" {
-		return EmailData{}, errors.New("destination address missing or invalid")
+		return nil, errors.New("destination address missing or invalid")
 	}
 	if data.SourceAddress == "" {
-		return EmailData{}, errors.New("source address missing or invalid")
+		return nil, errors.New("source address missing or invalid")
 	}
 	if data.TemplateID == "" {
-		return EmailData{}, errors.New("template ID missing or invalid")
+		return nil, errors.New("template ID missing or invalid")
 	}
 	if data.TemplateData == nil {
 		data.TemplateData = make(map[string]any)
 	}
 
-	return EmailData{
-		DestinationAddress: data.DestinationAddress,
-		SourceAddress:      data.SourceAddress,
-		TemplateID:         data.TemplateID,
-		TemplateData:       data.TemplateData,
-	}, nil
+	return data, nil
 }
