@@ -139,6 +139,13 @@ with the following shape:
     "dstAddress": "user@example.org",
     "providers": {
       // email provider specific data
+      "sendgrid": {
+        "subject": "Test Email from Example.org",
+        "templateId": "your-sendgrid-template-id",
+        "templateData": {
+          "code": "123456"
+        }
+      },
       "ses": {
         "templateId": "your-ses-template-id",
         "templateData": {

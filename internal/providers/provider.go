@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"net/mail"
 
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
@@ -15,7 +16,10 @@ type Provider interface {
 
 func NewProvider(cfg *config.Config) (Provider, error) {
 	var p Provider
+
 	switch cfg.AppEmailProvider {
+	case "sendgrid":
+		p = NewSendGridProvider(cfg)
 	case "ses":
 		p = NewSESProvider(cfg)
 	default:
@@ -33,4 +37,12 @@ func MergeTemplateData(base, additional map[string]any) map[string]any {
 		base[k] = v
 	}
 	return base
+}
+
+func ParseNameAddr(s string) (string, string) {
+	addr, err := mail.ParseAddress(s)
+	if err != nil || addr == nil {
+		return "", s
+	}
+	return addr.Name, addr.Address
 }

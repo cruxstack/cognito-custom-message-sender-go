@@ -20,9 +20,10 @@ type Config struct {
 	DebugMode                          bool
 	DebugDataPath                      string
 	SendGridApiHost                    string
+	SendGridEmailVerificationApiKey    string
 	SendGridEmailVerificationEnabled   bool
 	SendGridEmailVerificationAllowlist []string
-	SendGridApiKey                     string
+	SendGridEmailSendApiKey            string
 }
 
 func New() (*Config, error) {
@@ -37,13 +38,14 @@ func New() (*Config, error) {
 		AWSConfig:                          &awscfg,
 		AppKmsKeyId:                        os.Getenv("APP_KMS_KEY_ID"),
 		AppLogLevel:                        log.InfoLevel,
-		AppEmailProvider:                   "ses",
+		AppEmailProvider:                   os.Getenv("APP_EMAIL_PROVIDER"),
 		AppEmailSenderPolicyPath:           os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
 		AppSendEnabled:                     true,
-		SendGridApiKey:                     os.Getenv("APP_SENDGRID_API_KEY"),
 		SendGridApiHost:                    os.Getenv("APP_SENDGRID_API_HOST"),
+		SendGridEmailVerificationApiKey:    os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_API_KEY"),
 		SendGridEmailVerificationAllowlist: []string{},
 		SendGridEmailVerificationEnabled:   os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ENABLED") == "true",
+		SendGridEmailSendApiKey:            os.Getenv("APP_SENDGRID_EMAIL_SEND_API_KEY"),
 	}
 
 	// disable send if debug mode by default
@@ -54,6 +56,11 @@ func New() (*Config, error) {
 	logLevel, err := log.ParseLevel(os.Getenv("APP_LOG_LEVEL"))
 	if err == nil {
 		cfg.AppLogLevel = logLevel
+	}
+
+	if cfg.AppEmailProvider == "" || (cfg.AppEmailProvider != "ses" && cfg.AppEmailProvider != "sendgrid") {
+		log.Warn("fallback to ses for email provider because of unknown provider", "provider", cfg.AppEmailProvider)
+		cfg.AppEmailProvider = "ses"
 	}
 
 	allowlistStr := strings.TrimSpace(os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ALLOWLIST"))
@@ -73,6 +80,11 @@ func New() (*Config, error) {
 	if cfg.AppKmsKeyId == "" && os.Getenv("KMS_KEY_ID") != "" {
 		cfg.AppKmsKeyId = os.Getenv("KMS_KEY_ID")
 		log.Warn("KMS_KEY_ID env is deprecated; use APP_KMS_KEY_ID")
+	}
+
+	if cfg.SendGridEmailVerificationApiKey == "" && os.Getenv("APP_SENDGRID_API_KEY") != "" {
+		cfg.SendGridEmailVerificationApiKey = os.Getenv("APP_SENDGRID_API_KEY")
+		log.Warn("APP_SENDGRID_API_KEY env is deprecated; use APP_SENDGRID_EMAIL_VERIFICATION_API_KEY")
 	}
 
 	return &cfg, nil
