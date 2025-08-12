@@ -30,18 +30,20 @@ func (p *SESProvider) Name() string {
 }
 
 func (p *SESProvider) Send(ctx context.Context, d *types.EmailData) error {
+	d.Providers.SES.TemplateData = MergeTemplateData(d.Providers.SES.TemplateData, map[string]any{"code": d.VerificationCode})
+
 	if p.DryRun {
 		return p.SendDryRun(ctx, d)
 	}
 
-	dataJSON, err := json.Marshal(d.TemplateData)
+	dataJSON, err := json.Marshal(d.Providers.SES.TemplateData)
 	if err != nil {
 		return fmt.Errorf("error marshaling template data: %w", err)
 	}
 
 	_, err = p.Client.SendTemplatedEmail(ctx, &ses.SendTemplatedEmailInput{
 		Source:       awssdk.String(d.SourceAddress),
-		Template:     awssdk.String(d.TemplateID),
+		Template:     awssdk.String(d.Providers.SES.TemplateID),
 		TemplateData: awssdk.String(string(dataJSON)),
 		Destination:  &awstypes.Destination{ToAddresses: []string{d.DestinationAddress}},
 	})
@@ -53,18 +55,18 @@ func (p *SESProvider) Send(ctx context.Context, d *types.EmailData) error {
 }
 
 func (p *SESProvider) SendDryRun(ctx context.Context, d *types.EmailData) error {
-	dataJSON, err := json.Marshal(d.TemplateData)
+	dataJSON, err := json.Marshal(d.Providers.SES.TemplateData)
 	if err != nil {
 		return fmt.Errorf("error marshaling template data: %w", err)
 	}
 
 	log.Debug(
 		"[DRY-RUN] SES SendTemplateEmail:",
-		"templateID", d.TemplateID,
+		"templateID", d.Providers.SES.TemplateID,
 		"templateData", string(dataJSON),
 		"srcAddress", d.SourceAddress,
 		"dstAddress", d.DestinationAddress,
 	)
-	return nil
 
+	return nil
 }

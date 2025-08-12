@@ -24,3 +24,13 @@ func NewProvider(cfg *config.Config) (Provider, error) {
 
 	return p, nil
 }
+
+func MergeTemplateData(base, additional map[string]any) map[string]any {
+	if base == nil {
+		base = make(map[string]any)
+	}
+	for k, v := range additional {
+		base[k] = v
+	}
+	return base
+}

@@ -47,21 +47,20 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 }
 
 func (s *Sender) SendEmail(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSender) error {
-	code, err := encryption.Decrypt(ctx, s.Config.AppKmsKeyId, event.Request.Code)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt verification code: %w", err)
-	}
-
 	data, err := s.GetEmailData(ctx, event)
 	if err != nil {
 		return fmt.Errorf("failed to get email data: %w", err)
 	}
 
 	if data == nil {
-		return nil
+		return nil // do nothing
 	}
 
-	data.TemplateData = s.MergeTemplateData(data.TemplateData, map[string]any{"code": code})
+	code, err := encryption.Decrypt(ctx, s.Config.AppKmsKeyId, event.Request.Code)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt verification code: %w", err)
+	}
+	data.VerificationCode = code
 
 	err = s.Provider.Send(ctx, data)
 	if err != nil {
@@ -69,16 +68,6 @@ func (s *Sender) SendEmail(ctx context.Context, event aws.CognitoEventUserPoolsC
 	}
 
 	return nil
-}
-
-func (s *Sender) MergeTemplateData(base, additional map[string]any) map[string]any {
-	if base == nil {
-		base = make(map[string]any)
-	}
-	for k, v := range additional {
-		base[k] = v
-	}
-	return base
 }
 
 // GetEmailData retrieves the email data based on a policy evaluation.
@@ -136,11 +125,19 @@ func (s *Sender) ParseEmailData(data *types.EmailData) (*types.EmailData, error)
 	if data.SourceAddress == "" {
 		return nil, errors.New("source address missing or invalid")
 	}
-	if data.TemplateID == "" {
-		return nil, errors.New("template ID missing or invalid")
-	}
+
+	// allow for backwards compatibility with v1
 	if data.TemplateData == nil {
 		data.TemplateData = make(map[string]any)
+	}
+	if data.Providers == nil {
+		data.Providers = &types.EmailProviderMap{}
+	}
+	if data.Providers.SES == nil {
+		data.Providers.SES = &types.EmailProviderData{
+			TemplateID:   data.TemplateID,
+			TemplateData: data.TemplateData,
+		}
 	}
 
 	return data, nil
