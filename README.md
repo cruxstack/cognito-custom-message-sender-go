@@ -140,8 +140,7 @@ with the following shape:
     "providers": {
       // email provider specific data
       "sendgrid": {
-        "subject": "Test Email from Example.org",
-        "templateId": "your-sendgrid-template-id",
+        "templateId": "d-xxxxxxxxxxxxxxxxxx",
         "templateData": {
           "code": "123456"
         }
