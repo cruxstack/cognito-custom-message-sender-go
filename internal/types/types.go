@@ -10,7 +10,8 @@ type EmailData struct {
 }
 
 type EmailProviderMap struct {
-	SES *EmailProviderData `json:"ses,omitempty"`
+	SendGrid *EmailProviderData `json:"sendgrid,omitempty"`
+	SES      *EmailProviderData `json:"ses,omitempty"`
 }
 
 type EmailProviderData struct {

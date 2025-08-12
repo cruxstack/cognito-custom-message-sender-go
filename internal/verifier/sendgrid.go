@@ -97,6 +97,6 @@ func NewSendGridVerifier(cfg *config.Config) (*SendGridEmailVerifier, error) {
 	return &SendGridEmailVerifier{
 		Allowlist: cfg.SendGridEmailVerificationAllowlist,
 		APIHost:   cfg.SendGridApiHost,
-		APIKey:    cfg.SendGridApiKey,
+		APIKey:    cfg.SendGridEmailVerificationApiKey,
 	}, nil
 }

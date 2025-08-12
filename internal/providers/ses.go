@@ -61,8 +61,8 @@ func (p *SESProvider) SendDryRun(ctx context.Context, d *types.EmailData) error 
 	}
 
 	log.Debug(
-		"[DRY-RUN] SES SendTemplateEmail:",
-		"templateID", d.Providers.SES.TemplateID,
+		"[DRY-RUN] SES Send:",
+		"templateId", d.Providers.SES.TemplateID,
 		"templateData", string(dataJSON),
 		"srcAddress", d.SourceAddress,
 		"dstAddress", d.DestinationAddress,

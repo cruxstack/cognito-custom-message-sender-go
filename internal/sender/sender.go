@@ -133,11 +133,15 @@ func (s *Sender) ParseEmailData(data *types.EmailData) (*types.EmailData, error)
 	if data.Providers == nil {
 		data.Providers = &types.EmailProviderMap{}
 	}
-	if data.Providers.SES == nil {
+	if s.Config.AppEmailProvider == "ses" && data.Providers.SES == nil {
 		data.Providers.SES = &types.EmailProviderData{
 			TemplateID:   data.TemplateID,
 			TemplateData: data.TemplateData,
 		}
+	}
+
+	if s.Config.AppEmailProvider == "sendgrid" && data.Providers.SendGrid == nil {
+		return nil, fmt.Errorf("email provider is sendgrid but email data does not include data for sendgrid provider")
 	}
 
 	return data, nil
