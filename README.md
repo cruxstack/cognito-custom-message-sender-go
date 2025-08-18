@@ -74,10 +74,14 @@ result := allow_result {
 allow_result := {
   "action": "allow",
   "allow": {
-    "templateID": "verification-template",
-    "templateData": {},
     "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email
+    "dstAddress": input.userAttributes.email,
+    "providers": {
+      "ses": {
+        "templateID": "verification-template",
+        "templateData": {}
+      }
+    }
   }
 }
 
