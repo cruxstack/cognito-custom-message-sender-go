@@ -42,10 +42,10 @@ func New() (*Config, error) {
 		AppEmailSenderPolicyPath:           os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
 		AppSendEnabled:                     true,
 		SendGridApiHost:                    os.Getenv("APP_SENDGRID_API_HOST"),
+		SendGridEmailSendApiKey:            os.Getenv("APP_SENDGRID_EMAIL_SEND_API_KEY"),
 		SendGridEmailVerificationApiKey:    os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_API_KEY"),
 		SendGridEmailVerificationAllowlist: []string{},
 		SendGridEmailVerificationEnabled:   os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ENABLED") == "true",
-		SendGridEmailSendApiKey:            os.Getenv("APP_SENDGRID_EMAIL_SEND_API_KEY"),
 	}
 
 	// disable send if debug mode by default
