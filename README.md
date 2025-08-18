@@ -61,6 +61,7 @@ Example policy snippet:
 
 ```rego
 package cognito_custom_sender_email_policy
+import rego.v1
 
 result := deny_result {
   input.emailVerification != null

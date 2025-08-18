@@ -19,6 +19,8 @@ type Sender struct {
 	Config        *config.Config
 	KMS           *aws.KMSClient
 	EmailVerifier verifier.EmailVerifier
+	Policy        *string
+	PolicyQuery   *string
 	Provider      providers.Provider
 }
 
@@ -27,7 +29,14 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AWS client: %w", err)
 	}
-
+	if cfg.AppEmailSenderPolicyPath == "" {
+		return nil, fmt.Errorf("policy path is empty")
+	}
+	policyQuery := "data.cognito_hook_presignup.result"
+	policy, err := opa.ReadPolicy(cfg.AppEmailSenderPolicyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read policy at path: %s", cfg.AppEmailSenderPolicyPath)
+	}
 	verifier, err := verifier.NewSendGridVerifier(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("sendgrid init error: %s\n", err)
@@ -42,6 +51,8 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		Config:        cfg,
 		KMS:           aws.KMS,
 		Provider:      p,
+		Policy:        policy,
+		PolicyQuery:   &policyQuery,
 		EmailVerifier: verifier,
 	}, nil
 }
@@ -95,7 +106,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 		EmailVerification: verificationData,
 	}
 
-	output, err := opa.EvaluatePolicy[PolicyOutput](ctx, s.Config.AppEmailSenderPolicyPath, policyInput)
+	output, err := opa.EvaluatePolicy[PolicyOutput](ctx, s.Policy, s.PolicyQuery, policyInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate policy: %w", err)
 	}

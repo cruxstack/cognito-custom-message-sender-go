@@ -21,7 +21,7 @@ func TestEvaluatePolicy(t *testing.T) {
 	}()
 
 	policy := `
-		package cognito_custom_sender_email_policy
+		package mock_policy
 		result := {
 			"isAdmin": input.user == "admin"
 		}
@@ -51,9 +51,15 @@ func TestEvaluatePolicy(t *testing.T) {
 
 	ctx := context.Background()
 
+	q := "data.mock_policy.result"
+	p, err := ReadPolicy(policyFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := EvaluatePolicy[TestPolicyOutput](ctx, policyFile.Name(), tc.data)
+			result, err := EvaluatePolicy[TestPolicyOutput](ctx, p, &q, tc.data)
 			if err != nil {
 				t.Fatal(err)
 			}
