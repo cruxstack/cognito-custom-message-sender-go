@@ -11,19 +11,20 @@ import (
 )
 
 type Config struct {
-	AWSConfig                          *aws.Config
-	AppLogLevel                        log.Level
-	AppKmsKeyId                        string
-	AppEmailProvider                   string
-	AppEmailSenderPolicyPath           string
-	AppSendEnabled                     bool
-	DebugMode                          bool
-	DebugDataPath                      string
-	SendGridApiHost                    string
-	SendGridEmailVerificationApiKey    string
-	SendGridEmailVerificationEnabled   bool
-	SendGridEmailVerificationAllowlist []string
-	SendGridEmailSendApiKey            string
+	AWSConfig                       *aws.Config
+	AppLogLevel                     log.Level
+	AppKmsKeyId                     string
+	AppEmailProvider                string
+	AppEmailSenderPolicyPath        string
+	AppEmailVerificationEnabled     bool
+	AppEmailVerificationProvider    string
+	AppEmailVerificationWhitelist   []string
+	AppSendEnabled                  bool
+	DebugMode                       bool
+	DebugDataPath                   string
+	SendGridApiHost                 string
+	SendGridEmailVerificationApiKey string
+	SendGridEmailSendApiKey         string
 }
 
 func New() (*Config, error) {
@@ -33,19 +34,20 @@ func New() (*Config, error) {
 	}
 
 	cfg := Config{
-		DebugMode:                          os.Getenv("APP_DEBUG_MODE") == "true",
-		DebugDataPath:                      os.Getenv("APP_DEBUG_DATA_PATH"),
-		AWSConfig:                          &awscfg,
-		AppKmsKeyId:                        os.Getenv("APP_KMS_KEY_ID"),
-		AppLogLevel:                        log.InfoLevel,
-		AppEmailProvider:                   os.Getenv("APP_EMAIL_PROVIDER"),
-		AppEmailSenderPolicyPath:           os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
-		AppSendEnabled:                     true,
-		SendGridApiHost:                    os.Getenv("APP_SENDGRID_API_HOST"),
-		SendGridEmailSendApiKey:            os.Getenv("APP_SENDGRID_EMAIL_SEND_API_KEY"),
-		SendGridEmailVerificationApiKey:    os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_API_KEY"),
-		SendGridEmailVerificationAllowlist: []string{},
-		SendGridEmailVerificationEnabled:   os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ENABLED") == "true",
+		DebugMode:                       os.Getenv("APP_DEBUG_MODE") == "true",
+		DebugDataPath:                   os.Getenv("APP_DEBUG_DATA_PATH"),
+		AWSConfig:                       &awscfg,
+		AppKmsKeyId:                     os.Getenv("APP_KMS_KEY_ID"),
+		AppLogLevel:                     log.InfoLevel,
+		AppEmailProvider:                os.Getenv("APP_EMAIL_PROVIDER"),
+		AppEmailSenderPolicyPath:        os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
+		AppEmailVerificationEnabled:     os.Getenv("APP_EMAIL_VERIFICATION_ENABLED") == "true",
+		AppEmailVerificationProvider:    "sendgrid",
+		AppEmailVerificationWhitelist:   []string{},
+		AppSendEnabled:                  true,
+		SendGridApiHost:                 os.Getenv("APP_SENDGRID_API_HOST"),
+		SendGridEmailSendApiKey:         os.Getenv("APP_SENDGRID_EMAIL_SEND_API_KEY"),
+		SendGridEmailVerificationApiKey: os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_API_KEY"),
 	}
 
 	// disable send if debug mode by default
@@ -63,13 +65,13 @@ func New() (*Config, error) {
 		cfg.AppEmailProvider = "ses"
 	}
 
-	allowlistStr := strings.TrimSpace(os.Getenv("APP_SENDGRID_EMAIL_VERIFICATION_ALLOWLIST"))
+	allowlistStr := strings.TrimSpace(os.Getenv("APP_EMAIL_VERIFICATION_WHITELIST"))
 	if allowlistStr != "" {
 		allowlist := strings.Split(allowlistStr, ",")
 		for i, x := range allowlist {
 			allowlist[i] = strings.TrimSpace(x)
 		}
-		cfg.SendGridEmailVerificationAllowlist = allowlist
+		cfg.AppEmailVerificationWhitelist = allowlist
 	}
 
 	if cfg.SendGridApiHost == "" {

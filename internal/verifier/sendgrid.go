@@ -95,7 +95,7 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email str
 
 func NewSendGridVerifier(cfg *config.Config) (*SendGridEmailVerifier, error) {
 	return &SendGridEmailVerifier{
-		Allowlist: cfg.SendGridEmailVerificationAllowlist,
+		Allowlist: cfg.AppEmailVerificationWhitelist,
 		APIHost:   cfg.SendGridApiHost,
 		APIKey:    cfg.SendGridEmailVerificationApiKey,
 	}, nil

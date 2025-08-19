@@ -86,7 +86,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 	var verificationData *verifier.EmailVerificationResult
 	var err error
 
-	if s.Config.SendGridEmailVerificationEnabled {
+	if s.Config.AppEmailVerificationEnabled {
 		email, ok := event.Request.UserAttributes["email"].(string)
 		if !ok {
 			return nil, errors.New("missing or invalid 'email' in user attributes")

@@ -36,8 +36,8 @@ Configure your Lambda or local environment via environment variables:
 | `APP_SEND_ENABLED`                          | `true` to send via SES, `false` to dry-run.                               | `true`                            |
 | `APP_SENDGRID_API_KEY`                      | SendGrid API key for email verification.                                  | **required if enabling SendGrid** |
 | `APP_SENDGRID_API_HOST`                     | Base URL for SendGrid API.                                                | `https://api.sendgrid.com`        |
-| `APP_SENDGRID_EMAIL_VERIFICATION_ALLOWLIST` | List of email domains that automatically is validated as valid            | `""`                              |
-| `APP_SENDGRID_EMAIL_VERIFICATION_ENABLED`   | `true` to include SendGrid verification in policy input, `false` to skip. | `false`                           |
+| `APP_EMAIL_VERIFICATION_WHITELIST` | List of email domains that automatically is validated as valid            | `""`                              |
+| `APP_EMAIL_VERIFICATION_ENABLED`   | `true` to include SendGrid verification in policy input, `false` to skip. | `false`                           |
 
 > **Note:** `APP_SEND_ENABLED` is automatically set to `false` in debug mode unless explicitly overridden.
 
