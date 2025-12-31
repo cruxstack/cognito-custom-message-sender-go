@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	"github.com/aws/aws-sdk-go-v2/service/ses/types"
-	"github.com/charmbracelet/log"
 )
 
 type SESClient struct {
@@ -26,7 +26,12 @@ func (c *SESClient) SendEmail(ctx context.Context, templateID string, templateDa
 	}
 
 	if dryRun {
-		log.Debug("[DRY-RUN] SES SendTemplateEmail:", "templateID", templateID, "templateData", string(templateDataJSON), "srcAddress", srcAddress, "dstAddress", dstAddress)
+		slog.DebugContext(ctx, "dry-run ses send templated email",
+			"template_id", templateID,
+			"template_data", string(templateDataJSON),
+			"src_address", srcAddress,
+			"dst_address", dstAddress,
+		)
 		return nil
 	}
 

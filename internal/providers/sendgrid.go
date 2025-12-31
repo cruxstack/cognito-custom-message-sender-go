@@ -3,8 +3,8 @@ package providers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/sendgrid/sendgrid-go"
@@ -61,12 +61,11 @@ func (p *SendGridProvider) Send(ctx context.Context, d *types.EmailData) error {
 }
 
 func (p *SendGridProvider) SendDryRun(ctx context.Context, d *types.EmailData) error {
-	log.Debug("[DRY-RUN] SendGrid Send",
-		"templateId", d.Providers.SendGrid.TemplateID,
-		"templateData", d.Providers.SendGrid.TemplateData,
-		"srcAddress", d.SourceAddress,
-		"dstAddress", d.DestinationAddress,
-		"data.len", len(d.TemplateData),
+	slog.DebugContext(ctx, "dry-run sendgrid send",
+		"template_id", d.Providers.SendGrid.TemplateID,
+		"template_data", d.Providers.SendGrid.TemplateData,
+		"src_address", d.SourceAddress,
+		"dst_address", d.DestinationAddress,
 	)
 	return nil
 }

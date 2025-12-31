@@ -1,5 +1,7 @@
 package cognito_custom_sender_email_policy
 
+import rego.v1
+
 # default to sending message
 result := {
 	"action": "allow",

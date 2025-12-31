@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/sendgrid/sendgrid-go"
 )
@@ -27,21 +27,21 @@ type SendGridEmailEmailAddressValidationResponse struct {
 }
 
 type SendGridEmailVerifier struct {
-	Allowlist []string
+	Whitelist []string
 	APIHost   string
 	APIKey    string
 }
 
 func (v *SendGridEmailVerifier) VerifyEmail(ctx context.Context, email string) (*EmailVerificationResult, error) {
-	result, _ := v.VerifyEmailViaAllowlist(ctx, email)
+	result, _ := v.VerifyEmailViaWhitelist(ctx, email)
 	if result != nil {
-		log.Debug("email domain was on allowlist", "email", email)
+		slog.DebugContext(ctx, "email domain whitelisted", "email", email)
 		return result, nil
 	}
 	return v.VerifyEmailViaAPI(ctx, email)
 }
 
-func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, email string) (*EmailVerificationResult, error) {
+func (v *SendGridEmailVerifier) VerifyEmailViaWhitelist(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	addr, err := mail.ParseAddress(email)
 	if err != nil {
 		return nil, nil // invalid email format
@@ -53,7 +53,7 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, ema
 	}
 
 	domain := addr.Address[at+1:]
-	whitelisted := slices.Contains(v.Allowlist, domain)
+	whitelisted := slices.Contains(v.Whitelist, domain)
 
 	if !whitelisted {
 		return nil, nil
@@ -70,12 +70,21 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, ema
 
 func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	request := sendgrid.GetRequest(v.APIKey, "/v3/validations/email", v.APIHost)
-	request.Body = fmt.Appendf(request.Body, `{"email":"%s","source":"cognito"}`, email)
+	requestBody := map[string]string{"email": email, "source": "cognito"}
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+	request.Body = bodyBytes
 	request.Method = "POST"
 
 	response, err := sendgrid.API(request)
 	if err != nil {
 		return nil, fmt.Errorf("sendgrid api error: %w", err)
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("sendgrid api returned status %d: %s", response.StatusCode, response.Body)
 	}
 
 	var payload SendGridEmailEmailAddressValidationResponse
@@ -95,7 +104,7 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email str
 
 func NewSendGridVerifier(cfg *config.Config) (*SendGridEmailVerifier, error) {
 	return &SendGridEmailVerifier{
-		Allowlist: cfg.SendGridEmailVerificationAllowlist,
+		Whitelist: cfg.AppEmailVerificationWhitelist,
 		APIHost:   cfg.SendGridApiHost,
 		APIKey:    cfg.SendGridEmailVerificationApiKey,
 	}, nil

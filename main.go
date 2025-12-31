@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
@@ -21,14 +20,14 @@ func Handler(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSend
 	if os.Getenv("APP_DEBUG_MODE") == "true" {
 		evtJson, err := json.Marshal(event)
 		if err != nil {
-			log.Error("issue marshalling event: %v", err)
+			slog.ErrorContext(ctx, "failed to marshal event", "error", err)
 		}
-		log.Print(string(evtJson))
+		slog.DebugContext(ctx, "received event", "event", string(evtJson))
 	}
 
 	err := s.SendEmail(ctx, event)
 	if err != nil {
-		log.Error("failed to send email", "error", err)
+		slog.ErrorContext(ctx, "failed to send email", "error", err)
 		return err
 	}
 
@@ -38,14 +37,16 @@ func Handler(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSend
 func main() {
 	cfg, err := config.New()
 	if err != nil {
-		fmt.Printf("configuration error: %s", err)
+		slog.Error("configuration error", "error", err)
 		os.Exit(1)
 	}
-	log.SetLevel(cfg.AppLogLevel)
+
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.AppLogLevel})
+	slog.SetDefault(slog.New(handler))
 
 	s, err = sender.NewSender(context.Background(), cfg)
 	if err != nil {
-		fmt.Printf("sender init error: %s", err)
+		slog.Error("failed to initialize sender", "error", err)
 		os.Exit(1)
 	}
 

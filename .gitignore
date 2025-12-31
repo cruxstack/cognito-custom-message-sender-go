@@ -6,6 +6,7 @@ tmp/
 .local/
 .env
 
+dist/
 cognito-custom-message-sender-go
 main
 cli

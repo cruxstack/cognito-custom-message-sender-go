@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
@@ -16,10 +16,11 @@ import (
 )
 
 type Sender struct {
-	Config        *config.Config
-	KMS           *aws.KMSClient
-	EmailVerifier verifier.EmailVerifier
-	Provider      providers.Provider
+	Config         *config.Config
+	KMS            *aws.KMSClient
+	EmailVerifier  verifier.EmailVerifier
+	PreparedPolicy *opa.PreparedPolicy
+	Provider       providers.Provider
 }
 
 func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
@@ -27,10 +28,23 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AWS client: %w", err)
 	}
-
-	verifier, err := verifier.NewSendGridVerifier(cfg)
+	if cfg.AppEmailSenderPolicyPath == "" {
+		return nil, fmt.Errorf("policy path is empty")
+	}
+	policyQuery := "data.cognito_custom_sender_email_policy.result"
+	policy, err := opa.ReadPolicy(cfg.AppEmailSenderPolicyPath)
 	if err != nil {
-		return nil, fmt.Errorf("sendgrid init error: %s\n", err)
+		return nil, fmt.Errorf("failed to read policy at path %s: %w", cfg.AppEmailSenderPolicyPath, err)
+	}
+
+	preparedPolicy, err := opa.PreparePolicy(ctx, policy, policyQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare policy: %w", err)
+	}
+
+	emailVerifier, err := NewEmailVerifier(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("email verifier init error: %w", err)
 	}
 
 	p, err := providers.NewProvider(cfg)
@@ -39,10 +53,11 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	}
 
 	return &Sender{
-		Config:        cfg,
-		KMS:           aws.KMS,
-		Provider:      p,
-		EmailVerifier: verifier,
+		Config:         cfg,
+		KMS:            aws.KMS,
+		Provider:       p,
+		PreparedPolicy: preparedPolicy,
+		EmailVerifier:  emailVerifier,
 	}, nil
 }
 
@@ -75,7 +90,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 	var verificationData *verifier.EmailVerificationResult
 	var err error
 
-	if s.Config.SendGridEmailVerificationEnabled {
+	if s.Config.AppEmailVerificationEnabled {
 		email, ok := event.Request.UserAttributes["email"].(string)
 		if !ok {
 			return nil, errors.New("missing or invalid 'email' in user attributes")
@@ -83,7 +98,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 		verificationData, err = s.EmailVerifier.VerifyEmail(ctx, email)
 		if err != nil {
-			log.Warn("sendgrid verify email error", "error", err)
+			slog.WarnContext(ctx, "email verification failed", "email", email, "error", err)
 		}
 	}
 
@@ -95,7 +110,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 		EmailVerification: verificationData,
 	}
 
-	output, err := opa.EvaluatePolicy[PolicyOutput](ctx, s.Config.AppEmailSenderPolicyPath, policyInput)
+	output, err := opa.Evaluate[PolicyOutput](ctx, s.PreparedPolicy, policyInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate policy: %w", err)
 	}
@@ -106,7 +121,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 	if output.Action != "allow" {
 		email, _ := event.Request.UserAttributes["email"].(string)
-		log.Info("ignoring send request", "email", email, "reason", output.Reason)
+		slog.InfoContext(ctx, "send request denied by policy", "email", email, "reason", output.Reason)
 		return nil, nil
 	}
 
@@ -145,4 +160,16 @@ func (s *Sender) ParseEmailData(data *types.EmailData) (*types.EmailData, error)
 	}
 
 	return data, nil
+}
+
+func NewEmailVerifier(cfg *config.Config) (verifier.EmailVerifier, error) {
+	switch cfg.AppEmailVerificationProvider {
+	case "sendgrid":
+		return verifier.NewSendGridVerifier(cfg)
+	case "offline", "":
+		return verifier.NewOfflineVerifier(), nil
+	default:
+		slog.Warn("unknown email verification provider, defaulting to offline", "provider", cfg.AppEmailVerificationProvider)
+		return verifier.NewOfflineVerifier(), nil
+	}
 }
