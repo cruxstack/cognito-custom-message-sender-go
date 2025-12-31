@@ -1,108 +1,73 @@
 # Cognito Custom Message Sender
 
-A flexible AWS Lambda–based solution to send policy-driven emails in response
-to AWS Cognito events. It supports both AWS SES and SendGrid for delivery,
-optional SendGrid email verification, and a local debug mode for integration
-testing without real credentials or addresses. As an example, share a single
-userpool between multiple sites and-or apps, but send specific emails (templates)
-that match the respective site or app by returning different template-id based
-on the caller's client-id.
+## What
 
-## Features
+An AWS Lambda function that sends policy-driven emails in response to AWS
+Cognito events. It supports AWS SES and SendGrid for delivery, with optional
+SendGrid email verification.
 
-* **AWS Lambda Integration**: Handle Cognito Custom Email Sender events and
-  deliver emails based on OPA policies.
-* **Multiple Email Providers**: Support for both AWS SES and SendGrid as email
-  delivery providers.
-* **Policy-based Email Sending**: Evaluate Rego policies to allow or deny
-  sending, and to customize template ID, data, source, and destination
-  addresses.
-* **SendGrid Email Verification (optional)**: Fetch and include SendGrid email
-  verification data as policy input (disabled by default).
-* **Local Debug Mode**: Run integration tests against example event data and
-  policies, with mocked KMS decryption and dry-run sending.
-* **Dry-run Support**: Log email requests instead of sending when
-  `APP_SEND_ENABLED=false` or in debug mode.
-* **Offline E2E Tests**: Comprehensive test suite with mocked external services.
+## Why
 
-## Environment Variables
+AWS Cognito's built-in email templates are limited. This solution lets you:
 
-Configure your Lambda or local environment via environment variables:
+- **Share a single user pool across multiple sites/apps** while sending
+  site-specific emails based on client ID
+- **Use dynamic email templates** with custom data driven by OPA/Rego policies
+- **Choose your email provider** (SES or SendGrid) per deployment
+- **Validate email addresses** before sending (built-in RFC 5322 format
+  validation, or SendGrid's API for advanced checks like disposable/role-based
+  detection)
 
-| Variable                                    | Description                                                               | Default                    |
-| ------------------------------------------- | ------------------------------------------------------------------------- | -------------------------- |
-| `APP_DEBUG_MODE`                            | `true` to enable debug mode (loads `.env`, mocks KMS and dry-run).        | `false`                    |
-| `APP_DEBUG_DATA_PATH`                       | Path to JSON file containing array of Cognito event samples (for debug).  | `fixtures/debug-data.json` |
-| `APP_EMAIL_SENDER_POLICY_PATH`              | Path to the Rego policy file used by OPA.                                 | **required**               |
-| `APP_EMAIL_PROVIDER`                        | Email provider to use: `ses` or `sendgrid`.                               | `ses`                      |
-| `APP_KMS_KEY_ID`                            | KMS key ID for decrypting the Cognito code.                               | **required**               |
-| `APP_LOG_LEVEL`                             | Log level (`debug`, `info`, `warn`, `error`).                             | `info`                     |
-| `APP_SEND_ENABLED`                          | `true` to send emails, `false` to dry-run.                                | `true`                     |
-| `APP_EMAIL_VERIFICATION_ENABLED`            | `true` to include SendGrid verification in policy input, `false` to skip. | `false`                    |
-| `APP_EMAIL_VERIFICATION_WHITELIST`          | Comma-separated list of email domains that skip API verification.         | `""`                       |
-| `APP_SENDGRID_API_HOST`                     | Base URL for SendGrid API.                                                | `https://api.sendgrid.com` |
-| `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY`   | SendGrid API key for email verification.                                  | **required if verifying**  |
-| `APP_SENDGRID_EMAIL_SEND_API_KEY`           | SendGrid API key for sending emails.                                      | **required if sendgrid**   |
+## How It Works
 
-> **Note:** `APP_SEND_ENABLED` is automatically set to `false` in debug mode unless explicitly overridden.
+1. Cognito triggers the Lambda with a Custom Email Sender event
+2. The Lambda decrypts the verification code using KMS
+3. An OPA/Rego policy evaluates the event and returns:
+   - **Allow**: with template ID, template data, and addresses
+   - **Deny**: with a reason (email is not sent)
+4. If allowed, the email is sent via SES or SendGrid
 
-> **Deprecated:** `APP_SENDGRID_API_KEY` and `KMS_KEY_ID` are deprecated. Use
-> `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` and `APP_KMS_KEY_ID` respectively.
+## Deployment
 
-## SendGrid Email Verification (Optional)
+### 1. Build
 
-SendGrid's email address verification API improves the security and reliability
-of your Cognito workflows by proactively detecting invalid or risky email
-addresses before attempting to send. This helps reduce bounce rates, avoid AWS
-SES suppression, and prevent abuse by filtering out disposable, mistyped, or
-role-based emails.
-
-To include SendGrid verification results as input to your OPA policy:
-
-1. Set `APP_EMAIL_VERIFICATION_ENABLED=true`.
-2. Provide `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` via environment. Optionally
-   override host with `APP_SENDGRID_API_HOST`.
-3. In your Rego policy, reference `input.emailVerification` fields (`valid`,
-   `score`, `role`, `raw`).
-
-Example policy snippet:
-
-```rego
-package cognito_custom_sender_email_policy
-import rego.v1
-
-result := deny_result {
-  input.emailVerification != null
-  not input.emailVerification.valid
-}
-
-result := allow_result {
-  not deny_result
-}
-
-allow_result := {
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email,
-    "providers": {
-      "ses": {
-        "templateID": "verification-template",
-        "templateData": {}
-      }
-    }
-  }
-}
-
-deny_result := {
-  "action": "deny",
-  "reason": "email verification failed"
-}
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bootstrap main.go
 ```
 
-## OPA Policy Input
+### 2. Package
 
-The Rego policy receives a single `input` object with the following shape:
+```bash
+zip deployment.zip bootstrap policy.rego
+```
+
+### 3. Deploy
+
+Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
+
+- **IAM permissions**: KMS decrypt, SES send (if using SES)
+- **Environment variables**: see table below
+- **Cognito**: set as Custom Email Sender trigger
+
+### Environment Variables
+
+| Variable                                  | Description                                        | Default                      |
+| ----------------------------------------- | -------------------------------------------------- | ---------------------------- |
+| `APP_EMAIL_SENDER_POLICY_PATH`            | Path to the Rego policy file.                      | **required**                 |
+| `APP_KMS_KEY_ID`                          | KMS key ID for decrypting Cognito codes.           | **required**                 |
+| `APP_EMAIL_PROVIDER`                      | Email provider: `ses` or `sendgrid`.               | `ses`                        |
+| `APP_SEND_ENABLED`                        | `true` to send emails, `false` for dry-run.        | `true`                       |
+| `APP_LOG_LEVEL`                           | Log level: `debug`, `info`, `warn`, `error`.       | `info`                       |
+| `APP_EMAIL_VERIFICATION_ENABLED`          | `false` to disable email verification.             | `true`                       |
+| `APP_EMAIL_VERIFICATION_PROVIDER`         | Verification provider: `sendgrid` or `offline`.    | `offline`                    |
+| `APP_EMAIL_VERIFICATION_WHITELIST`        | Comma-separated domains that skip verification.    | `""`                         |
+| `APP_SENDGRID_API_HOST`                   | SendGrid API base URL.                             | `https://api.sendgrid.com`   |
+| `APP_SENDGRID_EMAIL_SEND_API_KEY`         | SendGrid API key for sending.                      | **required if sendgrid**     |
+| `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` | SendGrid API key for verification.                 | **required if sendgrid verification** |
+
+## Writing Policies
+
+The Rego policy receives an `input` object:
 
 ```jsonc
 {
@@ -119,21 +84,40 @@ The Rego policy receives a single `input` object with the following shape:
   "clientMetadata": {
     "key": "value"
   },
-  // only available if sendgrid is enabled
+  // present if APP_EMAIL_VERIFICATION_ENABLED=true
   "emailVerification": {
     "valid": true,
     "score": 0.97,
-    "raw": "{...raw sendgrid response...}"
+    "raw": "{...}"
   }
 }
 ```
 
-> `emailVerification` is omitted if SendGrid verification is disabled.
+The policy must return `data.cognito_custom_sender_email_policy.result`:
 
-The Rego policy must return a single object at `data.cognito_custom_sender_email_policy.result`
-with the following shape:
+**Allow:**
 
-* Deny example:
+```json
+{
+  "action": "allow",
+  "allow": {
+    "srcAddress": "noreply@example.org",
+    "dstAddress": "user@example.org",
+    "providers": {
+      "ses": {
+        "templateId": "your-ses-template",
+        "templateData": { "code": "123456" }
+      },
+      "sendgrid": {
+        "templateId": "d-xxxxxxxxxx",
+        "templateData": { "code": "123456" }
+      }
+    }
+  }
+}
+```
+
+**Deny:**
 
 ```json
 {
@@ -142,105 +126,129 @@ with the following shape:
 }
 ```
 
-* Allow example:
+### Example: Route by Client ID
 
-```jsonc
-{
+```rego
+package cognito_custom_sender_email_policy
+import rego.v1
+
+templates := {
+  "app-client-id-1": "d-template-for-app1",
+  "app-client-id-2": "d-template-for-app2",
+}
+
+result := {
   "action": "allow",
   "allow": {
-    "srcAddress": "noreply@example.org",
-    "dstAddress": "user@example.org",
+    "srcAddress": "noreply@example.com",
+    "dstAddress": input.userAttributes.email,
     "providers": {
-      // email provider specific data
       "sendgrid": {
-        "templateId": "d-xxxxxxxxxxxxxxxxxx",
-        "templateData": {
-          "code": "123456"
-        }
-      },
-      "ses": {
-        "templateId": "your-ses-template-id",
-        "templateData": {
-          "code": "123456"
-        }
+        "templateId": templates[input.callerContext.clientId],
+        "templateData": {}
       }
     }
   }
 }
 ```
 
-## Debug Mode & Local Integration Tests
+### Example: Deny on Failed Email Verification
 
-Use the `cmd/debug` utility to run against local fixtures without real emails or
-KMS:
+```rego
+package cognito_custom_sender_email_policy
+import rego.v1
 
-1. Copy or modify `.env.example` to `.env` and adjust values.
-2. Run the debug utility:
+result := {
+  "action": "deny",
+  "reason": "invalid email address"
+} if {
+  input.emailVerification != null
+  not input.emailVerification.valid
+}
 
-   ```bash
-   make debug
-   ```
+result := {
+  "action": "allow",
+  "allow": {
+    "srcAddress": "noreply@example.com",
+    "dstAddress": input.userAttributes.email,
+    "providers": {
+      "ses": {
+        "templateId": "verification-template",
+        "templateData": {}
+      }
+    }
+  }
+} if {
+  not result.action == "deny"
+}
+```
 
-   Or with custom fixtures:
+---
 
-   ```bash
-   go run ./cmd/debug -data path/to/events.json -policy path/to/policy.rego
-   ```
+# Development
 
-This mode:
+## Project Structure
 
-* Loads environment variables from `.env`.
-* Mocks KMS decryption if `APP_KMS_KEY_ID=MOCKED_KEY_ID`.
-* Dry-runs email requests (both SES and SendGrid).
-    - Set `APP_SEND_ENABLED=true` to explicitly enable email sends
+```
+├── cmd/debug/          # Debug CLI for local testing
+├── e2e/                # End-to-end tests
+├── fixtures/           # Test data and policies
+├── internal/
+│   ├── aws/            # AWS SDK wrappers (KMS, SES)
+│   ├── config/         # Environment configuration
+│   ├── encryption/     # KMS decryption
+│   ├── opa/            # Policy evaluation
+│   ├── providers/      # Email providers (SES, SendGrid)
+│   ├── sender/         # Core send logic
+│   ├── templates/      # Template handling
+│   ├── types/          # Shared types
+│   └── verifier/       # Email verification
+└── main.go             # Lambda entrypoint
+```
 
-## Testing
-
-Run the test suite using Make:
+## Running Tests
 
 ```bash
-# Run all tests
+# All tests
 make test
 
-# Run unit tests only
+# Unit tests only
 make test-unit
 
-# Run e2e/integration tests only
+# E2E tests only
 make test-e2e
 ```
 
-The e2e tests in `e2e/sender_test.go` are fully offline and use:
+E2E tests are fully offline using:
+- httptest mock server for SendGrid API
+- Mocked KMS (`APP_KMS_KEY_ID=MOCKED_KEY_ID`)
+- Mock email provider to capture sends
 
-* **httptest mock server** for SendGrid email verification API
-* **Mock provider** to capture and verify sent emails
-* **Mocked KMS** via `APP_KMS_KEY_ID=MOCKED_KEY_ID`
-* **Existing fixtures** (`fixtures/debug-policy.rego`) for policy evaluation
+## Debug Mode
 
-Test scenarios include:
-* Policy allows/denies email based on verification results
-* Different client IDs map to different templates
-* Whitelisted domains skip API verification
-* All Cognito trigger types (SignUp, ForgotPassword, etc.)
-* Error handling for missing attributes
+Test locally without real credentials:
 
-## Build & Deployment
+```bash
+# Using make (loads .env automatically)
+make debug
 
-1. Clone the repo:
+# Or with custom fixtures
+go run ./cmd/debug -data path/to/events.json -policy path/to/policy.rego
+```
 
-   ```bash
-   git clone https://github.com/cruxstack/cognito-custom-message-sender-go.git
-   cd cognito-custom-message-sender-go
-   ```
-2. Build for Linux:
+Debug mode:
+- Loads `.env` file
+- Mocks KMS decryption when `APP_KMS_KEY_ID=MOCKED_KEY_ID`
+- Dry-runs email sends by default (`APP_SEND_ENABLED=false`)
 
-   ```bash
-   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bootstrap main.go
-   ```
-3. Package:
+| Variable              | Description                            | Default                    |
+| --------------------- | -------------------------------------- | -------------------------- |
+| `APP_DEBUG_MODE`      | Enable debug mode.                     | `false`                    |
+| `APP_DEBUG_DATA_PATH` | Path to JSON file with Cognito events. | `fixtures/debug-data.json` |
 
-   ```bash
-   zip deployment.zip bootstrap policy.rego
-   ```
-4. Deploy via AWS CLI, Terraform, or AWS Console as a `provided.al2023`
-   runtime, setting the required environment variables and IAM role with
-   appropriate permissions (SES/SendGrid, KMS).
+## Deprecated Variables
+
+| Deprecated             | Use Instead                               |
+| ---------------------- | ----------------------------------------- |
+| `APP_SENDGRID_API_KEY` | `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` |
+| `KMS_KEY_ID`           | `APP_KMS_KEY_ID`                          |
