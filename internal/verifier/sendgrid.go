@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/sendgrid/sendgrid-go"
 )
@@ -35,7 +35,7 @@ type SendGridEmailVerifier struct {
 func (v *SendGridEmailVerifier) VerifyEmail(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	result, _ := v.VerifyEmailViaWhitelist(ctx, email)
 	if result != nil {
-		log.Debug("email domain was on whitelist", "email", email)
+		slog.DebugContext(ctx, "email domain whitelisted", "email", email)
 		return result, nil
 	}
 	return v.VerifyEmailViaAPI(ctx, email)

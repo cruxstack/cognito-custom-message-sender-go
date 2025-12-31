@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
@@ -98,7 +98,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 		verificationData, err = s.EmailVerifier.VerifyEmail(ctx, email)
 		if err != nil {
-			log.Warn("email verification error", "error", err)
+			slog.WarnContext(ctx, "email verification failed", "email", email, "error", err)
 		}
 	}
 
@@ -121,7 +121,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 	if output.Action != "allow" {
 		email, _ := event.Request.UserAttributes["email"].(string)
-		log.Info("ignoring send request", "email", email, "reason", output.Reason)
+		slog.InfoContext(ctx, "send request denied by policy", "email", email, "reason", output.Reason)
 		return nil, nil
 	}
 
@@ -169,7 +169,7 @@ func NewEmailVerifier(cfg *config.Config) (verifier.EmailVerifier, error) {
 	case "offline", "":
 		return verifier.NewOfflineVerifier(), nil
 	default:
-		log.Warn("unknown email verification provider, defaulting to offline", "provider", cfg.AppEmailVerificationProvider)
+		slog.Warn("unknown email verification provider, defaulting to offline", "provider", cfg.AppEmailVerificationProvider)
 		return verifier.NewOfflineVerifier(), nil
 	}
 }

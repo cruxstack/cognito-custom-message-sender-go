@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"log/slog"
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
@@ -67,32 +67,38 @@ func NewDebugConfig() (*config.Config, error) {
 func main() {
 	cfg, err := NewDebugConfig()
 	if err != nil {
-		log.Fatal("failed to debug load config", "error", err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
-	log.SetLevel(cfg.AppLogLevel)
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.AppLogLevel})
+	slog.SetDefault(slog.New(handler))
 
 	s, err := sender.NewSender(context.Background(), cfg)
 	if err != nil {
-		log.Fatal("failed to init sender", "error", err)
+		slog.Error("failed to initialize sender", "error", err)
+		os.Exit(1)
 	}
 
 	data, err := os.ReadFile(cfg.DebugDataPath)
 	if err != nil {
-		log.Fatal("failed to read data file", "path", dataPath, "error", err)
+		slog.Error("failed to read data file", "path", dataPath, "error", err)
+		os.Exit(1)
 	}
 
 	events := []aws.CognitoEventUserPoolsCustomEmailSender{}
 	if err := json.Unmarshal(data, &events); err != nil {
-		log.Fatal("failed to parse event file", "error", err)
+		slog.Error("failed to parse event file", "error", err)
+		os.Exit(1)
 	}
 
 	for i, e := range events {
 		if err := s.SendEmail(context.Background(), e); err != nil {
-			log.Error("integration test failed", "error", err)
+			slog.Error("integration test failed", "error", err)
 			os.Exit(1)
 		}
-		log.Info("integration iteration passed", "index", i)
+		slog.Info("integration iteration passed", "index", i)
 	}
 
-	log.Info("integration test passed")
+	slog.Info("integration test passed")
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/ses/types"
-	"github.com/charmbracelet/log"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 )
@@ -60,12 +60,11 @@ func (p *SESProvider) SendDryRun(ctx context.Context, d *types.EmailData) error 
 		return fmt.Errorf("error marshaling template data: %w", err)
 	}
 
-	log.Debug(
-		"[DRY-RUN] SES Send:",
-		"templateId", d.Providers.SES.TemplateID,
-		"templateData", string(dataJSON),
-		"srcAddress", d.SourceAddress,
-		"dstAddress", d.DestinationAddress,
+	slog.DebugContext(ctx, "dry-run ses send",
+		"template_id", d.Providers.SES.TemplateID,
+		"template_data", string(dataJSON),
+		"src_address", d.SourceAddress,
+		"dst_address", d.DestinationAddress,
 	)
 
 	return nil
