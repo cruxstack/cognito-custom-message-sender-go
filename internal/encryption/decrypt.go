@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 
 	"github.com/chainifynet/aws-encryption-sdk-go/pkg/client"
 	"github.com/chainifynet/aws-encryption-sdk-go/pkg/clientconfig"
@@ -13,8 +14,8 @@ import (
 )
 
 func Decrypt(ctx context.Context, kmsId, encryptedText string) (string, error) {
-	// mock the decryption for testing
-	if kmsId == "MOCKED_KEY_ID" {
+	// mock the decryption for testing - only allowed in debug mode
+	if os.Getenv("APP_DEBUG_MODE") == "true" && kmsId == "MOCKED_KEY_ID" {
 		return encryptedText, nil
 	}
 
@@ -41,7 +42,7 @@ func Decrypt(ctx context.Context, kmsId, encryptedText string) (string, error) {
 		return "", err
 	}
 
-	plaintext, _, err := client.Decrypt(context.TODO(), cipherText, cmm)
+	plaintext, _, err := client.Decrypt(ctx, cipherText, cmm)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed: %w", err)
 	}

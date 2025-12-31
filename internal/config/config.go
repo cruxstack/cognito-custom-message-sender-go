@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
@@ -89,5 +90,30 @@ func New() (*Config, error) {
 		log.Warn("APP_SENDGRID_API_KEY env is deprecated; use APP_SENDGRID_EMAIL_VERIFICATION_API_KEY")
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks that required configuration fields are set and valid
+func (c *Config) Validate() error {
+	if c.AppKmsKeyId == "" {
+		return errors.New("APP_KMS_KEY_ID is required")
+	}
+
+	if c.AppEmailSenderPolicyPath == "" {
+		return errors.New("APP_EMAIL_SENDER_POLICY_PATH is required")
+	}
+
+	if c.AppEmailProvider == "sendgrid" && c.SendGridEmailSendApiKey == "" {
+		return errors.New("APP_SENDGRID_EMAIL_SEND_API_KEY is required when using sendgrid provider")
+	}
+
+	if c.AppEmailVerificationEnabled && c.AppEmailVerificationProvider == "sendgrid" && c.SendGridEmailVerificationApiKey == "" {
+		return errors.New("APP_SENDGRID_EMAIL_VERIFICATION_API_KEY is required when using sendgrid email verification")
+	}
+
+	return nil
 }

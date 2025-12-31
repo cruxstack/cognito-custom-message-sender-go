@@ -197,6 +197,11 @@ func createTestSender(t *testing.T, cfg *config.Config, provider *MockProvider) 
 		t.Fatalf("failed to read policy: %v", err)
 	}
 
+	preparedPolicy, err := opa.PreparePolicy(context.Background(), policy, "data.cognito_custom_sender_email_policy.result")
+	if err != nil {
+		t.Fatalf("failed to prepare policy: %v", err)
+	}
+
 	emailVerifier := &verifier.SendGridEmailVerifier{
 		Whitelist: cfg.AppEmailVerificationWhitelist,
 		APIHost:   cfg.SendGridApiHost,
@@ -204,12 +209,11 @@ func createTestSender(t *testing.T, cfg *config.Config, provider *MockProvider) 
 	}
 
 	return &sender.Sender{
-		Config:        cfg,
-		KMS:           nil, // Not needed with MOCKED_KEY_ID
-		EmailVerifier: emailVerifier,
-		Policy:        policy,
-		PolicyQuery:   "data.cognito_custom_sender_email_policy.result",
-		Provider:      provider,
+		Config:         cfg,
+		KMS:            nil, // Not needed with MOCKED_KEY_ID
+		EmailVerifier:  emailVerifier,
+		PreparedPolicy: preparedPolicy,
+		Provider:       provider,
 	}
 }
 
@@ -576,6 +580,8 @@ func TestMain(m *testing.M) {
 	os.Setenv("AWS_ACCESS_KEY_ID", "test")
 	os.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	os.Setenv("AWS_REGION", "us-east-1")
+	// Enable debug mode for MOCKED_KEY_ID to work
+	os.Setenv("APP_DEBUG_MODE", "true")
 
 	os.Exit(m.Run())
 }

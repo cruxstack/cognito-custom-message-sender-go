@@ -70,12 +70,21 @@ func (v *SendGridEmailVerifier) VerifyEmailViaWhitelist(ctx context.Context, ema
 
 func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	request := sendgrid.GetRequest(v.APIKey, "/v3/validations/email", v.APIHost)
-	request.Body = fmt.Appendf(request.Body, `{"email":"%s","source":"cognito"}`, email)
+	requestBody := map[string]string{"email": email, "source": "cognito"}
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+	request.Body = bodyBytes
 	request.Method = "POST"
 
 	response, err := sendgrid.API(request)
 	if err != nil {
 		return nil, fmt.Errorf("sendgrid api error: %w", err)
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("sendgrid api returned status %d: %s", response.StatusCode, response.Body)
 	}
 
 	var payload SendGridEmailEmailAddressValidationResponse

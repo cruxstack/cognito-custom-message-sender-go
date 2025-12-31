@@ -16,12 +16,11 @@ import (
 )
 
 type Sender struct {
-	Config        *config.Config
-	KMS           *aws.KMSClient
-	EmailVerifier verifier.EmailVerifier
-	Policy        string
-	PolicyQuery   string
-	Provider      providers.Provider
+	Config         *config.Config
+	KMS            *aws.KMSClient
+	EmailVerifier  verifier.EmailVerifier
+	PreparedPolicy *opa.PreparedPolicy
+	Provider       providers.Provider
 }
 
 func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
@@ -35,8 +34,14 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	policyQuery := "data.cognito_custom_sender_email_policy.result"
 	policy, err := opa.ReadPolicy(cfg.AppEmailSenderPolicyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read policy at path: %s", cfg.AppEmailSenderPolicyPath)
+		return nil, fmt.Errorf("failed to read policy at path %s: %w", cfg.AppEmailSenderPolicyPath, err)
 	}
+
+	preparedPolicy, err := opa.PreparePolicy(ctx, policy, policyQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare policy: %w", err)
+	}
+
 	emailVerifier, err := NewEmailVerifier(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("email verifier init error: %w", err)
@@ -48,12 +53,11 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	}
 
 	return &Sender{
-		Config:        cfg,
-		KMS:           aws.KMS,
-		Provider:      p,
-		Policy:        policy,
-		PolicyQuery:   policyQuery,
-		EmailVerifier: emailVerifier,
+		Config:         cfg,
+		KMS:            aws.KMS,
+		Provider:       p,
+		PreparedPolicy: preparedPolicy,
+		EmailVerifier:  emailVerifier,
 	}, nil
 }
 
@@ -106,7 +110,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 		EmailVerification: verificationData,
 	}
 
-	output, err := opa.EvaluatePolicy[PolicyOutput](ctx, s.Policy, s.PolicyQuery, policyInput)
+	output, err := opa.Evaluate[PolicyOutput](ctx, s.PreparedPolicy, policyInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate policy: %w", err)
 	}
