@@ -37,9 +37,9 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read policy at path: %s", cfg.AppEmailSenderPolicyPath)
 	}
-	verifier, err := verifier.NewSendGridVerifier(cfg)
+	emailVerifier, err := NewEmailVerifier(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("sendgrid init error: %s\n", err)
+		return nil, fmt.Errorf("email verifier init error: %w", err)
 	}
 
 	p, err := providers.NewProvider(cfg)
@@ -53,7 +53,7 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		Provider:      p,
 		Policy:        policy,
 		PolicyQuery:   policyQuery,
-		EmailVerifier: verifier,
+		EmailVerifier: emailVerifier,
 	}, nil
 }
 
@@ -94,7 +94,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event aws.CognitoEventUserPoo
 
 		verificationData, err = s.EmailVerifier.VerifyEmail(ctx, email)
 		if err != nil {
-			log.Warn("sendgrid verify email error", "error", err)
+			log.Warn("email verification error", "error", err)
 		}
 	}
 
@@ -156,4 +156,16 @@ func (s *Sender) ParseEmailData(data *types.EmailData) (*types.EmailData, error)
 	}
 
 	return data, nil
+}
+
+func NewEmailVerifier(cfg *config.Config) (verifier.EmailVerifier, error) {
+	switch cfg.AppEmailVerificationProvider {
+	case "sendgrid":
+		return verifier.NewSendGridVerifier(cfg)
+	case "offline", "":
+		return verifier.NewOfflineVerifier(), nil
+	default:
+		log.Warn("unknown email verification provider, defaulting to offline", "provider", cfg.AppEmailVerificationProvider)
+		return verifier.NewOfflineVerifier(), nil
+	}
 }
