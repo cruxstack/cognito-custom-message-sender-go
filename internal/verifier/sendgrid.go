@@ -27,21 +27,21 @@ type SendGridEmailEmailAddressValidationResponse struct {
 }
 
 type SendGridEmailVerifier struct {
-	Allowlist []string
+	Whitelist []string
 	APIHost   string
 	APIKey    string
 }
 
 func (v *SendGridEmailVerifier) VerifyEmail(ctx context.Context, email string) (*EmailVerificationResult, error) {
-	result, _ := v.VerifyEmailViaAllowlist(ctx, email)
+	result, _ := v.VerifyEmailViaWhitelist(ctx, email)
 	if result != nil {
-		log.Debug("email domain was on allowlist", "email", email)
+		log.Debug("email domain was on whitelist", "email", email)
 		return result, nil
 	}
 	return v.VerifyEmailViaAPI(ctx, email)
 }
 
-func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, email string) (*EmailVerificationResult, error) {
+func (v *SendGridEmailVerifier) VerifyEmailViaWhitelist(ctx context.Context, email string) (*EmailVerificationResult, error) {
 	addr, err := mail.ParseAddress(email)
 	if err != nil {
 		return nil, nil // invalid email format
@@ -53,7 +53,7 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAllowlist(ctx context.Context, ema
 	}
 
 	domain := addr.Address[at+1:]
-	whitelisted := slices.Contains(v.Allowlist, domain)
+	whitelisted := slices.Contains(v.Whitelist, domain)
 
 	if !whitelisted {
 		return nil, nil
@@ -95,7 +95,7 @@ func (v *SendGridEmailVerifier) VerifyEmailViaAPI(ctx context.Context, email str
 
 func NewSendGridVerifier(cfg *config.Config) (*SendGridEmailVerifier, error) {
 	return &SendGridEmailVerifier{
-		Allowlist: cfg.AppEmailVerificationWhitelist,
+		Whitelist: cfg.AppEmailVerificationWhitelist,
 		APIHost:   cfg.SendGridApiHost,
 		APIKey:    cfg.SendGridEmailVerificationApiKey,
 	}, nil

@@ -19,8 +19,8 @@ type Sender struct {
 	Config        *config.Config
 	KMS           *aws.KMSClient
 	EmailVerifier verifier.EmailVerifier
-	Policy        *string
-	PolicyQuery   *string
+	Policy        string
+	PolicyQuery   string
 	Provider      providers.Provider
 }
 
@@ -32,7 +32,7 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 	if cfg.AppEmailSenderPolicyPath == "" {
 		return nil, fmt.Errorf("policy path is empty")
 	}
-	policyQuery := "data.cognito_hook_presignup.result"
+	policyQuery := "data.cognito_custom_sender_email_policy.result"
 	policy, err := opa.ReadPolicy(cfg.AppEmailSenderPolicyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read policy at path: %s", cfg.AppEmailSenderPolicyPath)
@@ -52,7 +52,7 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		KMS:           aws.KMS,
 		Provider:      p,
 		Policy:        policy,
-		PolicyQuery:   &policyQuery,
+		PolicyQuery:   policyQuery,
 		EmailVerifier: verifier,
 	}, nil
 }

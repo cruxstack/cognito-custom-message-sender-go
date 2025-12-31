@@ -14,10 +14,10 @@ import (
 // EvaluatePolicy compiles policy and evaluates a query against input
 // - returns *T where T matches the rego result shape
 // - enforces rego v1 semantics during compilation
-func EvaluatePolicy[T any](ctx context.Context, policy *string, query *string, input any) (*T, error) {
+func EvaluatePolicy[T any](ctx context.Context, policy string, query string, input any) (*T, error) {
 	r := rego.New(
-		rego.Query(*query),
-		rego.Module("policy.rego", *policy),
+		rego.Query(query),
+		rego.Module("policy.rego", policy),
 		rego.SetRegoVersion(ast.RegoV1),
 	)
 
@@ -48,12 +48,11 @@ func EvaluatePolicy[T any](ctx context.Context, policy *string, query *string, i
 	return &out, nil
 }
 
-func ReadPolicy(path string) (*string, error) {
+func ReadPolicy(path string) (string, error) {
 	p, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read policy file: %w", err)
+		return "", fmt.Errorf("failed to read policy file: %w", err)
 	}
 
-	policy := string(p)
-	return &policy, nil
+	return string(p), nil
 }

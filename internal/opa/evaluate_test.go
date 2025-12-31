@@ -59,7 +59,7 @@ func TestEvaluatePolicy(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := EvaluatePolicy[TestPolicyOutput](ctx, p, &q, tc.data)
+			result, err := EvaluatePolicy[TestPolicyOutput](ctx, p, q, tc.data)
 			if err != nil {
 				t.Fatal(err)
 			}

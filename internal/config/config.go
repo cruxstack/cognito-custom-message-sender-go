@@ -65,13 +65,13 @@ func New() (*Config, error) {
 		cfg.AppEmailProvider = "ses"
 	}
 
-	allowlistStr := strings.TrimSpace(os.Getenv("APP_EMAIL_VERIFICATION_WHITELIST"))
-	if allowlistStr != "" {
-		allowlist := strings.Split(allowlistStr, ",")
-		for i, x := range allowlist {
-			allowlist[i] = strings.TrimSpace(x)
+	whitelistStr := strings.TrimSpace(os.Getenv("APP_EMAIL_VERIFICATION_WHITELIST"))
+	if whitelistStr != "" {
+		whitelist := strings.Split(whitelistStr, ",")
+		for i, x := range whitelist {
+			whitelist[i] = strings.TrimSpace(x)
 		}
-		cfg.AppEmailVerificationWhitelist = allowlist
+		cfg.AppEmailVerificationWhitelist = whitelist
 	}
 
 	if cfg.SendGridApiHost == "" {
