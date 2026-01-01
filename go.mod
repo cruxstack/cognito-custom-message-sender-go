@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.51.1
 	github.com/aws/aws-sdk-go-v2 v1.41.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
-	github.com/aws/aws-sdk-go-v2/service/kms v1.37.6
+	github.com/aws/aws-sdk-go-v2/service/kms v1.49.4
 	github.com/aws/aws-sdk-go-v2/service/ses v1.22.2
 	github.com/chainifynet/aws-encryption-sdk-go v0.5.0
 	github.com/joho/godotenv v1.5.1
