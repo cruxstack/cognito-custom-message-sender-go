@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.59.1
 	github.com/chainifynet/aws-encryption-sdk-go v0.5.0
 	github.com/joho/godotenv v1.5.1
-	github.com/open-policy-agent/opa v1.12.1
+	github.com/open-policy-agent/opa v1.12.2
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 )
 
