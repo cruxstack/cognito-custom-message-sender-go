@@ -9,20 +9,30 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/ses/types"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 )
 
 type SESProvider struct {
-	Client *ses.Client
-	DryRun bool
+	Client        *ses.Client
+	DryRun        bool
+	healthChecker *SESHealthChecker
 }
 
 func NewSESProvider(cfg *config.Config) *SESProvider {
-	return &SESProvider{
+	p := &SESProvider{
 		Client: ses.NewFromConfig(*cfg.AWSConfig),
 		DryRun: !cfg.AppSendEnabled,
 	}
+
+	// Only create health checker if failover is enabled
+	if cfg.AppEmailFailoverEnabled {
+		sesv2Client := sesv2.NewFromConfig(*cfg.AWSConfig)
+		p.healthChecker = NewSESHealthChecker(sesv2Client, cfg.AppEmailFailoverCacheTTL)
+	}
+
+	return p
 }
 
 func (p *SESProvider) Name() string {
@@ -68,4 +78,14 @@ func (p *SESProvider) SendDryRun(ctx context.Context, d *types.EmailData) error 
 	)
 
 	return nil
+}
+
+// IsHealthy implements HealthChecker interface.
+// Returns true if SES sending is enabled for the account.
+// If no health checker is configured (failover disabled), always returns true.
+func (p *SESProvider) IsHealthy(ctx context.Context) bool {
+	if p.healthChecker == nil {
+		return true
+	}
+	return p.healthChecker.IsHealthy(ctx)
 }

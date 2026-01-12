@@ -4,7 +4,7 @@
 
 An AWS Lambda function that sends policy-driven emails in response to AWS
 Cognito events. It supports AWS SES and SendGrid for delivery, with optional
-SendGrid email verification.
+SendGrid email verification and automatic failover between providers.
 
 ## Why
 
@@ -14,6 +14,7 @@ AWS Cognito's built-in email templates are limited. This solution lets you:
   site-specific emails based on client ID
 - **Use dynamic email templates** with custom data driven by OPA/Rego policies
 - **Choose your email provider** (SES or SendGrid) per deployment
+- **Automatic failover** between providers when SES is suspended or unavailable
 - **Validate email addresses** before sending (built-in RFC 5322 format
   validation, or SendGrid's API for advanced checks like disposable/role-based
   detection)
@@ -64,6 +65,75 @@ Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
 | `APP_SENDGRID_API_HOST`                   | SendGrid API base URL.                             | `https://api.sendgrid.com`   |
 | `APP_SENDGRID_EMAIL_SEND_API_KEY`         | SendGrid API key for sending.                      | **required if sendgrid**     |
 | `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` | SendGrid API key for verification.                 | **required if sendgrid verification** |
+| `APP_EMAIL_FAILOVER_ENABLED`              | Enable automatic provider failover.                | `false`                      |
+| `APP_EMAIL_FAILOVER_PROVIDERS`            | Comma-separated failover providers (e.g., `sendgrid`). | **required if failover**  |
+| `APP_EMAIL_FAILOVER_CACHE_TTL`            | Health check cache duration (Go duration format).  | `30s`                        |
+
+## Provider Failover
+
+AWS can suspend SES sending at any time for compliance reasons. Enable automatic
+failover to ensure emails continue to be delivered via an alternative provider.
+
+### How It Works
+
+1. Before each send, the system checks SES account status via the `GetAccount` API
+2. The result is cached (default 30s) to avoid excessive API calls
+3. If SES is unhealthy (`SendingEnabled=false`), it fails over to the next provider
+4. If a provider fails to send, it tries the next one in the chain
+5. If all providers fail, a warning is logged (no Lambda retry to avoid cascading failures)
+
+### Configuration Example
+
+```bash
+# Primary provider
+APP_EMAIL_PROVIDER=ses
+
+# Enable failover with SendGrid as backup
+APP_EMAIL_FAILOVER_ENABLED=true
+APP_EMAIL_FAILOVER_PROVIDERS=sendgrid
+APP_EMAIL_FAILOVER_CACHE_TTL=30s
+
+# SendGrid credentials (required when in failover chain)
+APP_SENDGRID_EMAIL_SEND_API_KEY=SG.xxxx
+```
+
+### Policy Requirements
+
+When failover is enabled, your policy **must** return template configurations for
+all providers in the failover chain. If a provider's config is missing, it will
+be skipped with a warning.
+
+```rego
+result := {
+  "action": "allow",
+  "allow": {
+    "srcAddress": "noreply@example.com",
+    "dstAddress": input.userAttributes.email,
+    "providers": {
+      "ses": {
+        "templateId": "ses-verification-template",
+        "templateData": {"appName": "MyApp"}
+      },
+      "sendgrid": {
+        "templateId": "d-abc123def456",
+        "templateData": {"appName": "MyApp"}
+      }
+    }
+  }
+}
+```
+
+### IAM Permissions
+
+When failover is enabled, add SESv2 `GetAccount` permission:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["ses:SendTemplatedEmail", "sesv2:GetAccount"],
+  "Resource": "*"
+}
+```
 
 ## Writing Policies
 
