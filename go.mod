@@ -3,7 +3,7 @@ module github.com/cruxstack/cognito-custom-message-sender-go
 go 1.24.6
 
 require (
-	github.com/aws/aws-lambda-go v1.51.1
+	github.com/aws/aws-lambda-go v1.51.2
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.6
 	github.com/aws/aws-sdk-go-v2/service/kms v1.37.6
