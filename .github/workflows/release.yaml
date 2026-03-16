@@ -22,7 +22,7 @@ jobs:
           default_bump: minor
           custom_release_rules: bug:patch:Fixes,chore:patch:Chores,docs:patch:Documentation,feat:minor:Features,refactor:minor:Refactors,test:patch:Tests,ci:patch:Development,dev:patch:Development
       - name: Create Release
-        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           tag: ${{ steps.tag_version.outputs.new_tag }}
           name: ${{ steps.tag_version.outputs.new_tag }}
