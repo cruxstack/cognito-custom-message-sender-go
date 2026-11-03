@@ -31,7 +31,11 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: minor
-          custom_release_rules: bug:patch:Fixes,chore:patch:Chores,docs:patch:Documentation,feat:minor:Features,refactor:minor:Refactors,test:patch:Tests,ci:patch:Development,dev:patch:Development
+          # a custom rule that matches a commit's type wins over the default
+          # "breaking change -> major" rule, so types that carry breaking
+          # changes (feat, fix, refactor) must not be listed here. feat and
+          # fix use the default rules, and refactor uses default_bump.
+          custom_release_rules: bug:patch:Fixes,chore:patch:Chores,docs:patch:Documentation,test:patch:Tests,ci:patch:Development,dev:patch:Development
       - name: Build Lambda Artifacts
         env:
           VERSION: ${{ steps.tag_version.outputs.new_tag }}
