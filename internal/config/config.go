@@ -14,6 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/ratelimit"
 )
 
 const defaultFailoverCacheTTL = 30 * time.Second
@@ -36,6 +37,9 @@ type Config struct {
 	AppEmailFailoverEnabled         bool
 	AppEmailFailoverProviders       []string
 	AppEmailFailoverCacheTTL        time.Duration
+	AppEmailRateLimitEnabled        bool
+	AppEmailRateLimitTableName      string
+	AppEmailRateLimit               *ratelimit.Config
 }
 
 func New() (*Config, error) {
@@ -73,6 +77,8 @@ func fromEnv() (*Config, error) {
 		AppEmailFailoverEnabled:         envBool("APP_EMAIL_FAILOVER_ENABLED", false),
 		AppEmailFailoverProviders:       envLowerList("APP_EMAIL_FAILOVER_PROVIDERS"),
 		AppEmailFailoverCacheTTL:        defaultFailoverCacheTTL,
+		AppEmailRateLimitEnabled:        envBool("APP_EMAIL_RATE_LIMIT_ENABLED", false),
+		AppEmailRateLimitTableName:      strings.TrimSpace(os.Getenv("APP_EMAIL_RATE_LIMIT_TABLE_NAME")),
 	}
 
 	if s := os.Getenv("APP_LOG_LEVEL"); s != "" {
@@ -91,6 +97,16 @@ func fromEnv() (*Config, error) {
 		} else {
 			cfg.AppEmailFailoverCacheTTL = ttl
 		}
+	}
+
+	// the rate limit config is only read when the feature is enabled, so an
+	// invalid value cannot affect deployments that leave it off
+	if cfg.AppEmailRateLimitEnabled {
+		rl, err := ratelimit.ParseConfig(os.Getenv("APP_EMAIL_RATE_LIMIT_CONFIG"))
+		if err != nil {
+			return nil, fmt.Errorf("invalid APP_EMAIL_RATE_LIMIT_CONFIG: %w", err)
+		}
+		cfg.AppEmailRateLimit = rl
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -130,6 +146,16 @@ func (c *Config) Validate() error {
 
 	if slices.Contains(c.ProviderChain(), "sendgrid") && c.SendGridEmailSendApiKey == "" {
 		return errors.New("APP_SENDGRID_EMAIL_SEND_API_KEY is required when sendgrid is used for sending")
+	}
+
+	if c.AppEmailRateLimitEnabled {
+		if c.AppEmailRateLimit == nil {
+			return errors.New("rate limit config is required when APP_EMAIL_RATE_LIMIT_ENABLED is true")
+		}
+		// debug mode falls back to an in-memory store when no table is set
+		if c.AppEmailRateLimitTableName == "" && !c.DebugMode {
+			return errors.New("APP_EMAIL_RATE_LIMIT_TABLE_NAME is required when APP_EMAIL_RATE_LIMIT_ENABLED is true")
+		}
 	}
 
 	return nil

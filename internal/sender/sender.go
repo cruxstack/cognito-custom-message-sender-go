@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/opa"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/providers"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/ratelimit"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
 )
@@ -21,12 +23,20 @@ type Decrypter interface {
 	Decrypt(ctx context.Context, ciphertext string) (string, error)
 }
 
+// RateLimiter decides whether an email may be sent. Check must not fail;
+// store errors resolve to a fail-open or fail-closed decision.
+type RateLimiter interface {
+	Check(ctx context.Context, req ratelimit.Request) *ratelimit.Result
+}
+
 type Sender struct {
 	Config         *config.Config
 	Decrypter      Decrypter
 	EmailVerifier  verifier.EmailVerifier
 	PreparedPolicy *opa.PreparedPolicy
 	Provider       providers.Provider
+	// RateLimiter is nil when rate limiting is disabled
+	RateLimiter RateLimiter
 }
 
 func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
@@ -50,13 +60,18 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		return nil, fmt.Errorf("failed to create email provider: %w", err)
 	}
 
-	return &Sender{
+	s := &Sender{
 		Config:         cfg,
 		Decrypter:      decrypter,
 		EmailVerifier:  NewEmailVerifier(cfg),
 		PreparedPolicy: preparedPolicy,
 		Provider:       provider,
-	}, nil
+	}
+	if cfg.AppEmailRateLimitEnabled {
+		s.RateLimiter = newRateLimiter(cfg)
+	}
+
+	return s, nil
 }
 
 func (s *Sender) SendEmail(ctx context.Context, event types.CognitoEventUserPoolsCustomEmailSender) error {
@@ -85,6 +100,23 @@ func (s *Sender) SendEmail(ctx context.Context, event types.CognitoEventUserPool
 func (s *Sender) GetEmailData(ctx context.Context, event types.CognitoEventUserPoolsCustomEmailSender) (*types.EmailData, error) {
 	email, _ := event.Request.UserAttributes["email"].(string)
 
+	// rate limits run first so throttled emails skip verification lookups.
+	// cognito invokes this function asynchronously, so a throttle cannot
+	// fail the user's request; the email is dropped without an error.
+	var rateLimit *ratelimit.Result
+	if s.RateLimiter != nil {
+		rateLimit = s.RateLimiter.Check(ctx, ratelimit.Request{
+			Trigger:        event.TriggerSource,
+			Email:          email,
+			UserName:       event.UserName,
+			UserAttributes: event.Request.UserAttributes,
+			Code:           event.Request.Code,
+		})
+		if !rateLimit.Allowed() {
+			return nil, nil
+		}
+	}
+
 	var verification *verifier.EmailVerificationResult
 	if s.Config.AppEmailVerificationEnabled {
 		if email == "" {
@@ -104,6 +136,7 @@ func (s *Sender) GetEmailData(ctx context.Context, event types.CognitoEventUserP
 		UserAttributes:    event.Request.UserAttributes,
 		ClientMetadata:    event.Request.ClientMetadata,
 		EmailVerification: verification,
+		RateLimit:         rateLimit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate policy: %w", err)
@@ -155,6 +188,19 @@ func NewEmailVerifier(cfg *config.Config) verifier.EmailVerifier {
 		slog.Warn("unknown email verification provider, defaulting to offline", "provider", cfg.AppEmailVerificationProvider)
 	}
 	return verifier.NewOfflineVerifier()
+}
+
+func newRateLimiter(cfg *config.Config) RateLimiter {
+	if cfg.AppEmailRateLimitTableName == "" && cfg.DebugMode {
+		slog.Warn("no rate limit table set in debug mode, using an in-memory store")
+		return ratelimit.New(cfg.AppEmailRateLimit, ratelimit.NewMemoryStore())
+	}
+
+	// keep sdk retries short; the limiter has its own deadline and fails open
+	client := dynamodb.NewFromConfig(*cfg.AWSConfig, func(o *dynamodb.Options) {
+		o.RetryMaxAttempts = 2
+	})
+	return ratelimit.New(cfg.AppEmailRateLimit, ratelimit.NewDynamoDBStore(client, cfg.AppEmailRateLimitTableName))
 }
 
 func newDecrypter(cfg *config.Config) (Decrypter, error) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/opa"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/ratelimit"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
@@ -605,5 +608,123 @@ func TestSendEmail_EmptyCode_SkipsDecrypt(t *testing.T) {
 	}
 	if emails[0].VerificationCode != "" {
 		t.Errorf("expected empty code, got %q", emails[0].VerificationCode)
+	}
+}
+
+// withRateLimit enables the real limiter backed by an in-memory store.
+func withRateLimit(t *testing.T, s *sender.Sender, raw string) *ratelimit.MemoryStore {
+	t.Helper()
+
+	rl, err := ratelimit.ParseConfig(raw)
+	if err != nil {
+		t.Fatalf("invalid rate limit config: %v", err)
+	}
+	s.Config.AppEmailRateLimitEnabled = true
+	s.Config.AppEmailRateLimit = rl
+
+	store := ratelimit.NewMemoryStore()
+	s.RateLimiter = ratelimit.New(rl, store, ratelimit.WithLogger(slog.New(slog.DiscardHandler)))
+	return store
+}
+
+func TestSendEmail_RateLimit_ThrottlesRepeatedSignups(t *testing.T) {
+	mockSendGrid := NewSendGridMockServer()
+	defer mockSendGrid.Close()
+
+	cfg := testConfig(t, mockSendGrid.URL(), true)
+	provider := &MockProvider{}
+	s := createTestSender(t, cfg, provider)
+	withRateLimit(t, s, `{"classes": {"signup": {"destination": [{"window": "1h", "max": 2}]}}}`)
+
+	ctx := context.Background()
+
+	// aliases of one mailbox share a counter
+	for i, addr := range []string{"user@example.com", "User+a@example.com", "user+b@Example.com", "user@example.com"} {
+		event := newCognitoEvent("CustomEmailSender_SignUp", "xxxx1111", addr, fmt.Sprintf("code-%d", i))
+		if err := s.SendEmail(ctx, event); err != nil {
+			t.Fatalf("attempt %d: throttling must not return an error, got: %v", i+1, err)
+		}
+	}
+
+	if got := len(provider.GetSentEmails()); got != 2 {
+		t.Fatalf("expected 2 emails sent before throttling, got %d", got)
+	}
+
+	// throttled emails skip the verification api
+	if mockSendGrid.RequestCount != 2 {
+		t.Errorf("expected 2 SendGrid API calls, got %d", mockSendGrid.RequestCount)
+	}
+
+	// other mailboxes keep their own budget
+	if err := s.SendEmail(ctx, newCognitoEvent("CustomEmailSender_SignUp", "xxxx1111", "other@example.com", "code-x")); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got := len(provider.GetSentEmails()); got != 3 {
+		t.Errorf("expected 3 emails sent, got %d", got)
+	}
+}
+
+func TestSendEmail_RateLimit_RetryCountedOnce(t *testing.T) {
+	mockSendGrid := NewSendGridMockServer()
+	defer mockSendGrid.Close()
+
+	cfg := testConfig(t, mockSendGrid.URL(), false)
+	provider := &MockProvider{}
+	s := createTestSender(t, cfg, provider)
+	withRateLimit(t, s, `{"classes": {"authentication": {"destination": [{"window": "15m", "max": 2}]}}}`)
+
+	ctx := context.Background()
+	first := newCognitoEvent("CustomEmailSender_Authentication", "xxxx1111", "user@example.com", "ciphertext-1")
+
+	// the provider fails, so lambda would retry the same event
+	provider.SendError = errors.New("provider unavailable")
+	if err := s.SendEmail(ctx, first); err == nil {
+		t.Fatal("expected the provider error to be returned for a retry")
+	}
+
+	provider.SendError = nil
+	if err := s.SendEmail(ctx, first); err != nil {
+		t.Fatalf("retry: expected no error, got: %v", err)
+	}
+
+	// the retry did not use budget, so one more new code fits under the limit
+	second := newCognitoEvent("CustomEmailSender_Authentication", "xxxx1111", "user@example.com", "ciphertext-2")
+	third := newCognitoEvent("CustomEmailSender_Authentication", "xxxx1111", "user@example.com", "ciphertext-3")
+	for _, e := range []types.CognitoEventUserPoolsCustomEmailSender{second, third} {
+		if err := s.SendEmail(ctx, e); err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+	}
+
+	emails := provider.GetSentEmails()
+	if len(emails) != 2 {
+		t.Fatalf("expected 2 emails sent (retry and second code), got %d", len(emails))
+	}
+	if emails[0].VerificationCode != "ciphertext-1" || emails[1].VerificationCode != "ciphertext-2" {
+		t.Errorf("unexpected codes sent: %q, %q", emails[0].VerificationCode, emails[1].VerificationCode)
+	}
+}
+
+func TestSendEmail_RateLimit_AdminCreateUserExempt(t *testing.T) {
+	mockSendGrid := NewSendGridMockServer()
+	defer mockSendGrid.Close()
+
+	cfg := testConfig(t, mockSendGrid.URL(), false)
+	provider := &MockProvider{}
+	s := createTestSender(t, cfg, provider)
+	store := withRateLimit(t, s, "")
+
+	for i := range 10 {
+		event := newCognitoEvent("CustomEmailSender_AdminCreateUser", "xxxx1111", "user@example.com", fmt.Sprintf("code-%d", i))
+		if err := s.SendEmail(context.Background(), event); err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+	}
+
+	if got := len(provider.GetSentEmails()); got != 10 {
+		t.Errorf("expected all 10 admin emails sent, got %d", got)
+	}
+	if store.Len() != 0 {
+		t.Errorf("expected exempt emails to skip the store, found %d items", store.Len())
 	}
 }
