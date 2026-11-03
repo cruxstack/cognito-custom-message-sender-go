@@ -4,8 +4,8 @@ v3 restructures the service and tightens its contracts. Most email policies
 that use `allow.providers` keep working unchanged; configuration needs a few
 renames. If you deploy with the
 [Terraform module](https://github.com/cruxstack/terraform-aws-cognito-custom-message-sender),
-upgrade the module to the major version that targets v3 instead of setting
-these variables yourself.
+upgrade it to v4, which runs v3 for both email and SMS, instead of setting
+these variables yourself; its readme lists the renamed module variables.
 
 Upgrade checklist:
 

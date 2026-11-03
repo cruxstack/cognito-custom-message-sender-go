@@ -62,10 +62,13 @@ The code is added to the template data as `code`. See
 ```hcl
 module "cognito_message_sender" {
   source  = "cruxstack/cognito-custom-message-sender/aws"
-  version = "x.x.x" # a version that targets v3 of this function
+  version = "~> 4.0" # module v4 runs v3 of this function of this function
 
   email_sender_enabled        = true
   email_sender_policy_content = file("${path.module}/policy.rego")
+
+  sms_sender_enabled        = true
+  sms_sender_policy_content = file("${path.module}/sms-policy.rego")
 }
 ```
 
