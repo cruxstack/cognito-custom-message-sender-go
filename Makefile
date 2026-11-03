@@ -6,6 +6,7 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 TEST_FLAGS := -race -count=1
+DYNAMODB_ENDPOINT ?= http://localhost:8000
 .PHONY: build-debug
 build-debug:
 	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "-s -w" -o dist/debug ./cmd/debug
@@ -25,3 +26,7 @@ test-unit:
 .PHONY: test-e2e
 test-e2e:
 	$(TEST_ENV) go test $(TEST_FLAGS) ./e2e
+
+.PHONY: test-dynamodb
+test-dynamodb:
+	RATELIMIT_DYNAMODB_ENDPOINT=$(DYNAMODB_ENDPOINT) $(TEST_ENV) go test $(TEST_FLAGS) -run TestDynamoDBStore ./internal/ratelimit
