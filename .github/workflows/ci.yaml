@@ -20,7 +20,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          go-version: '1.24'
+          go-version: '1.27'
       - name: Run go vet
         run: go vet ./...
       - name: Check formatting
@@ -40,7 +40,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          go-version: '1.24'
+          go-version: '1.27'
       - name: Run tests
         run: make test
 
@@ -52,6 +52,6 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          go-version: '1.24'
+          go-version: '1.27'
       - name: Build Lambda
         run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/bootstrap .
