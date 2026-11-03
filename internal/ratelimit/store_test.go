@@ -16,7 +16,7 @@ import (
 
 // dynamoDBEndpointEnv points the store tests at DynamoDB Local, for example
 // http://localhost:8000. The DynamoDB tests are skipped when it is unset.
-const dynamoDBEndpointEnv = "RATELIMIT_DYNAMODB_ENDPOINT"
+const dynamoDBEndpointEnv = "DYNAMODB_LOCAL_ENDPOINT"
 
 func TestMemoryStore(t *testing.T) {
 	testStore(t, func(t *testing.T) Store { return NewMemoryStore() })

@@ -1,0 +1,194 @@
+[
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123450",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123451",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123452",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123453",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123454",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123455",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "00000000-aaaa-0000-aaaa-000000000000",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "+12065550100",
+        "phone_number_verified": "true",
+        "sub": "00000000-aaaa-0000-aaaa-000000000000"
+      },
+      "code": "123456",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomSMSSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "callerContext": {
+      "awsSdkVersion": "aws-sdk-unknown-unknown",
+      "clientId": "1example23456789"
+    },
+    "userName": "11111111-aaaa-1111-aaaa-111111111111",
+    "request": {
+      "userAttributes": {
+        "cognito:user_status": "CONFIRMED",
+        "email": "user@example.com",
+        "email_verified": "true",
+        "phone_number": "not-a-phone-number",
+        "phone_number_verified": "true",
+        "sub": "11111111-aaaa-1111-aaaa-111111111111"
+      },
+      "code": "654321",
+      "clientMetadata": null,
+      "type": "customSMSSenderRequestV1"
+    }
+  }
+]

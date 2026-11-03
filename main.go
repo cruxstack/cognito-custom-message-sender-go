@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/handler"
 )
 
 func main() {
@@ -22,22 +22,17 @@ func main() {
 	}
 	level.Set(cfg.AppLogLevel)
 
-	s, err := sender.NewSender(context.Background(), cfg)
+	h, err := handler.New(context.Background(), cfg)
 	if err != nil {
 		slog.Error("failed to initialize sender", "error", err)
 		os.Exit(1)
 	}
 
-	lambda.Start(func(ctx context.Context, event types.CognitoEventUserPoolsCustomEmailSender) error {
+	lambda.Start(func(ctx context.Context, event json.RawMessage) error {
 		if cfg.DebugMode {
 			slog.DebugContext(ctx, "received event", "event", event)
 		}
 
-		if err := s.SendEmail(ctx, event); err != nil {
-			slog.ErrorContext(ctx, "failed to send email", "error", err)
-			return err
-		}
-
-		return nil
+		return h.Handle(ctx, event)
 	})
 }
