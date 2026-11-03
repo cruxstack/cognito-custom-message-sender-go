@@ -334,6 +334,10 @@ Throttle logs include the masked address (`u***@example.com`) and its hash.
   still succeeds. Users who request many codes may need to wait for the window
   to reset.
 - Fixed windows allow short bursts at window boundaries.
+- Each window is counted independently. When many emails to one address
+  arrive at the same moment, an attempt can be within one window's limit but
+  over another's, so a burst can send fewer emails than the smallest limit. It
+  never sends more.
 - Address hashes are unsalted SHA-256, so someone with table access can test
   whether a known address appears.
 - Each counted email adds one conditional write and one update per configured

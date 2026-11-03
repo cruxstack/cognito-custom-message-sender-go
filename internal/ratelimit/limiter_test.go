@@ -646,22 +646,44 @@ func TestLimiter_Timeout(t *testing.T) {
 }
 
 func TestLimiter_ConcurrentChecks(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
+	burst := func(t *testing.T, cfg *Config) (sent int64, h *harness) {
+		t.Helper()
+		h = newHarness(t, cfg, nil, slog.LevelError)
+		var n atomic.Int64
+		var wg sync.WaitGroup
+		for range 50 {
+			wg.Go(func() {
+				if h.check("CustomEmailSender_SignUp", "user@example.com", nil).Allowed() {
+					n.Add(1)
+				}
+			})
+		}
+		wg.Wait()
+		return n.Load(), h
+	}
 
-	var sent atomic.Int64
-	var wg sync.WaitGroup
-	for range 50 {
-		wg.Go(func() {
-			if h.check("CustomEmailSender_SignUp", "user@example.com", nil).Allowed() {
-				sent.Add(1)
-			}
+	t.Run("single window sends exactly the limit", func(t *testing.T) {
+		cfg := configWith(func(c *Config) {
+			c.Classes[ClassSignUp] = ClassConfig{Destination: []Limit{{Window(time.Hour), 3}}}
 		})
-	}
-	wg.Wait()
+		if sent, _ := burst(t, cfg); sent != 3 {
+			t.Errorf("sent %d emails, want exactly the limit of 3", sent)
+		}
+	})
 
-	if sent.Load() != 3 {
-		t.Errorf("sent %d emails, want exactly the limit of 3", sent.Load())
-	}
+	// windows are counted independently, so in a burst an attempt can be
+	// within one window's limit but over another's; the burst never sends
+	// more than the smallest limit
+	t.Run("multiple windows never exceed a limit", func(t *testing.T) {
+		sent, h := burst(t, DefaultConfig())
+		if sent > 3 {
+			t.Errorf("sent %d emails, want at most the limit of 3", sent)
+		}
+		r := h.check("CustomEmailSender_SignUp", "user@example.com", nil)
+		if r.Destination[0].Count != 51 || r.Destination[1].Count != 51 {
+			t.Errorf("Destination = %+v, want every attempt counted in both windows", r.Destination)
+		}
+	})
 }
 
 func TestLimiter_Metrics(t *testing.T) {
