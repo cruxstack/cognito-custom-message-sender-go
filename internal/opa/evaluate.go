@@ -16,13 +16,30 @@ type PreparedPolicy struct {
 	query rego.PreparedEvalQuery
 }
 
+// Option configures how a policy is prepared.
+type Option func(*options)
+
+type options struct {
+	regoVersion ast.RegoVersion
+}
+
+// WithRegoV0 parses the policy with rego v0 syntax instead of v1.
+func WithRegoV0() Option {
+	return func(o *options) { o.regoVersion = ast.RegoV0 }
+}
+
 // PreparePolicy compiles a policy and query for later evaluation.
 // This should be called once at initialization and the result cached.
-func PreparePolicy(ctx context.Context, policy string, query string) (*PreparedPolicy, error) {
+func PreparePolicy(ctx context.Context, policy string, query string, opts ...Option) (*PreparedPolicy, error) {
+	o := options{regoVersion: ast.RegoV1}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	r := rego.New(
 		rego.Query(query),
 		rego.Module("policy.rego", policy),
-		rego.SetRegoVersion(ast.RegoV1),
+		rego.SetRegoVersion(o.regoVersion),
 	)
 
 	pq, err := r.PrepareForEval(ctx)

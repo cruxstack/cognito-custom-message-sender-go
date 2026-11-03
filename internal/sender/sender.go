@@ -50,7 +50,7 @@ func NewSender(ctx context.Context, cfg *config.Config) (*Sender, error) {
 		return nil, err
 	}
 
-	decrypter, err := newDecrypter(cfg)
+	decrypter, err := encryption.NewDecrypter(cfg.AppKmsKeyId, cfg.DebugMode)
 	if err != nil {
 		return nil, err
 	}
@@ -201,16 +201,4 @@ func newRateLimiter(cfg *config.Config) RateLimiter {
 		o.RetryMaxAttempts = 2
 	})
 	return ratelimit.New(cfg.AppEmailRateLimit, ratelimit.NewDynamoDBStore(client, cfg.AppEmailRateLimitTableName))
-}
-
-func newDecrypter(cfg *config.Config) (Decrypter, error) {
-	if cfg.DebugMode && cfg.AppKmsKeyId == encryption.MockKeyID {
-		return encryption.Passthrough{}, nil
-	}
-
-	d, err := encryption.NewKMSDecrypter(cfg.AppKmsKeyId)
-	if err != nil {
-		return nil, err
-	}
-	return d, nil
 }

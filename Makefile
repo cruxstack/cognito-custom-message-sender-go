@@ -15,6 +15,10 @@ build-debug:
 debug:
 	go run ./cmd/debug -data ./fixtures/debug-data.json -policy ./fixtures/debug-policy.rego
 
+.PHONY: debug-sms
+debug-sms:
+	go run ./cmd/debug -data ./fixtures/debug-sms-data.json -sms-policy ./fixtures/sms-policy.rego
+
 .PHONY: test
 test:
 	$(TEST_ENV) go test $(TEST_FLAGS) ./...
@@ -29,4 +33,4 @@ test-e2e:
 
 .PHONY: test-dynamodb
 test-dynamodb:
-	RATELIMIT_DYNAMODB_ENDPOINT=$(DYNAMODB_ENDPOINT) $(TEST_ENV) go test $(TEST_FLAGS) -run TestDynamoDBStore ./internal/ratelimit
+	DYNAMODB_LOCAL_ENDPOINT=$(DYNAMODB_ENDPOINT) $(TEST_ENV) go test $(TEST_FLAGS) -run TestDynamoDB ./internal/ratelimit ./internal/smssender

@@ -24,6 +24,12 @@ func setBaseEnv(t *testing.T) {
 		"APP_EMAIL_RATE_LIMIT_ENABLED",
 		"APP_EMAIL_RATE_LIMIT_TABLE_NAME",
 		"APP_EMAIL_RATE_LIMIT_CONFIG",
+		"APP_EMAIL_SENDER_ENABLED",
+		"APP_SMS_SENDER_ENABLED",
+		"APP_SMS_SENDER_POLICY_PATH",
+		"APP_SMS_HISTORY_TABLE_NAME",
+		"APP_SMS_HISTORY_TTL",
+		"APP_SMS_THROTTLE_PERIOD",
 		"APP_LOG_LEVEL",
 		"APP_SENDGRID_API_KEY",
 		"APP_SENDGRID_EMAIL_SEND_API_KEY",
@@ -180,6 +186,31 @@ func TestFromEnv_ValidationErrors(t *testing.T) {
 			"APP_EMAIL_RATE_LIMIT_CONFIG",
 		},
 		{
+			"no sender enabled",
+			map[string]string{"APP_EMAIL_SENDER_ENABLED": "false"},
+			"at least one of",
+		},
+		{
+			"sms without policy",
+			map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_HISTORY_TABLE_NAME": "t"},
+			"APP_SMS_SENDER_POLICY_PATH",
+		},
+		{
+			"sms without history table",
+			map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_SENDER_POLICY_PATH": "sms.rego"},
+			"APP_SMS_HISTORY_TABLE_NAME",
+		},
+		{
+			"sms invalid throttle period",
+			map[string]string{"APP_SMS_THROTTLE_PERIOD": "15"},
+			"APP_SMS_THROTTLE_PERIOD",
+		},
+		{
+			"sms negative history ttl",
+			map[string]string{"APP_SMS_HISTORY_TTL": "-1h"},
+			"APP_SMS_HISTORY_TTL",
+		},
+		{
 			"rate limit with invalid values",
 			map[string]string{
 				"APP_EMAIL_RATE_LIMIT_ENABLED":    "true",
@@ -248,5 +279,50 @@ func TestFromEnv_RateLimitDebugWithoutTable(t *testing.T) {
 	}
 	if cfg.AppEmailRateLimit == nil {
 		t.Error("AppEmailRateLimit = nil, want defaults")
+	}
+}
+
+func TestFromEnv_SenderDefaults(t *testing.T) {
+	setBaseEnv(t)
+
+	cfg, err := fromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.AppEmailSenderEnabled || cfg.AppSMSSenderEnabled {
+		t.Errorf("email = %v, sms = %v; want email only by default", cfg.AppEmailSenderEnabled, cfg.AppSMSSenderEnabled)
+	}
+	if cfg.AppSMSHistoryTTL != defaultSMSHistoryTTL || cfg.AppSMSThrottlePeriod != defaultSMSThrottle {
+		t.Errorf("sms durations = %v, %v", cfg.AppSMSHistoryTTL, cfg.AppSMSThrottlePeriod)
+	}
+}
+
+func TestFromEnv_SMSOnly(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("APP_EMAIL_SENDER_POLICY_PATH", "")
+	t.Setenv("APP_EMAIL_SENDER_ENABLED", "false")
+	t.Setenv("APP_SMS_SENDER_ENABLED", "true")
+	t.Setenv("APP_SMS_SENDER_POLICY_PATH", "sms.rego")
+	t.Setenv("APP_SMS_HISTORY_TABLE_NAME", " sms-history ")
+	t.Setenv("APP_SMS_HISTORY_TTL", "48h")
+	t.Setenv("APP_SMS_THROTTLE_PERIOD", "5m")
+
+	cfg, err := fromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AppSMSHistoryTableName != "sms-history" || cfg.AppSMSHistoryTTL != 48*time.Hour || cfg.AppSMSThrottlePeriod != 5*time.Minute {
+		t.Errorf("sms config = %q, %v, %v", cfg.AppSMSHistoryTableName, cfg.AppSMSHistoryTTL, cfg.AppSMSThrottlePeriod)
+	}
+}
+
+func TestFromEnv_SMSDebugWithoutTable(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("APP_DEBUG_MODE", "true")
+	t.Setenv("APP_SMS_SENDER_ENABLED", "true")
+	t.Setenv("APP_SMS_SENDER_POLICY_PATH", "sms.rego")
+
+	if _, err := fromEnv(); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

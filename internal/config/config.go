@@ -17,13 +17,18 @@ import (
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/ratelimit"
 )
 
-const defaultFailoverCacheTTL = 30 * time.Second
+const (
+	defaultFailoverCacheTTL = 30 * time.Second
+	defaultSMSHistoryTTL    = 30 * 24 * time.Hour
+	defaultSMSThrottle      = 15 * time.Minute
+)
 
 type Config struct {
 	AWSConfig                       *aws.Config
 	AppLogLevel                     slog.Level
 	AppKmsKeyId                     string
 	AppEmailProvider                string
+	AppEmailSenderEnabled           bool
 	AppEmailSenderPolicyPath        string
 	AppEmailVerificationEnabled     bool
 	AppEmailVerificationProvider    string
@@ -40,6 +45,11 @@ type Config struct {
 	AppEmailRateLimitEnabled        bool
 	AppEmailRateLimitTableName      string
 	AppEmailRateLimit               *ratelimit.Config
+	AppSMSSenderEnabled             bool
+	AppSMSSenderPolicyPath          string
+	AppSMSHistoryTableName          string
+	AppSMSHistoryTTL                time.Duration
+	AppSMSThrottlePeriod            time.Duration
 }
 
 func New() (*Config, error) {
@@ -64,6 +74,7 @@ func fromEnv() (*Config, error) {
 		AppLogLevel:                     slog.LevelInfo,
 		AppKmsKeyId:                     envWithFallback("APP_KMS_KEY_ID", "KMS_KEY_ID"),
 		AppEmailProvider:                cmp.Or(envLower("APP_EMAIL_PROVIDER"), "ses"),
+		AppEmailSenderEnabled:           envBool("APP_EMAIL_SENDER_ENABLED", true),
 		AppEmailSenderPolicyPath:        os.Getenv("APP_EMAIL_SENDER_POLICY_PATH"),
 		AppEmailVerificationEnabled:     envBool("APP_EMAIL_VERIFICATION_ENABLED", true),
 		AppEmailVerificationProvider:    envLower("APP_EMAIL_VERIFICATION_PROVIDER"),
@@ -79,6 +90,11 @@ func fromEnv() (*Config, error) {
 		AppEmailFailoverCacheTTL:        defaultFailoverCacheTTL,
 		AppEmailRateLimitEnabled:        envBool("APP_EMAIL_RATE_LIMIT_ENABLED", false),
 		AppEmailRateLimitTableName:      strings.TrimSpace(os.Getenv("APP_EMAIL_RATE_LIMIT_TABLE_NAME")),
+		AppSMSSenderEnabled:             envBool("APP_SMS_SENDER_ENABLED", false),
+		AppSMSSenderPolicyPath:          os.Getenv("APP_SMS_SENDER_POLICY_PATH"),
+		AppSMSHistoryTableName:          strings.TrimSpace(os.Getenv("APP_SMS_HISTORY_TABLE_NAME")),
+		AppSMSHistoryTTL:                defaultSMSHistoryTTL,
+		AppSMSThrottlePeriod:            defaultSMSThrottle,
 	}
 
 	if s := os.Getenv("APP_LOG_LEVEL"); s != "" {
@@ -96,6 +112,19 @@ func fromEnv() (*Config, error) {
 			slog.Warn("invalid APP_EMAIL_FAILOVER_CACHE_TTL, using default", "value", s, "default", defaultFailoverCacheTTL)
 		} else {
 			cfg.AppEmailFailoverCacheTTL = ttl
+		}
+	}
+
+	for key, dst := range map[string]*time.Duration{
+		"APP_SMS_HISTORY_TTL":     &cfg.AppSMSHistoryTTL,
+		"APP_SMS_THROTTLE_PERIOD": &cfg.AppSMSThrottlePeriod,
+	} {
+		if s := os.Getenv(key); s != "" {
+			d, err := time.ParseDuration(s)
+			if err != nil || d <= 0 {
+				return nil, fmt.Errorf("invalid %s %q: must be a positive go duration", key, s)
+			}
+			*dst = d
 		}
 	}
 
@@ -121,8 +150,22 @@ func (c *Config) Validate() error {
 		return errors.New("APP_KMS_KEY_ID is required")
 	}
 
-	if c.AppEmailSenderPolicyPath == "" {
+	if !c.AppEmailSenderEnabled && !c.AppSMSSenderEnabled {
+		return errors.New("at least one of APP_EMAIL_SENDER_ENABLED or APP_SMS_SENDER_ENABLED must be true")
+	}
+
+	if c.AppEmailSenderEnabled && c.AppEmailSenderPolicyPath == "" {
 		return errors.New("APP_EMAIL_SENDER_POLICY_PATH is required")
+	}
+
+	if c.AppSMSSenderEnabled {
+		if c.AppSMSSenderPolicyPath == "" {
+			return errors.New("APP_SMS_SENDER_POLICY_PATH is required when APP_SMS_SENDER_ENABLED is true")
+		}
+		// debug mode falls back to an in-memory history when no table is set
+		if c.AppSMSHistoryTableName == "" && !c.DebugMode {
+			return errors.New("APP_SMS_HISTORY_TABLE_NAME is required when APP_SMS_SENDER_ENABLED is true")
+		}
 	}
 
 	if !isValidProvider(c.AppEmailProvider) {

@@ -16,6 +16,24 @@ import (
 
 const MockKeyID = "MOCKED_KEY_ID"
 
+type Decrypter interface {
+	Decrypt(ctx context.Context, ciphertext string) (string, error)
+}
+
+// NewDecrypter returns a kms decrypter, or a passthrough decrypter in debug
+// mode when keyID is MockKeyID.
+func NewDecrypter(keyID string, debug bool) (Decrypter, error) {
+	if debug && keyID == MockKeyID {
+		return Passthrough{}, nil
+	}
+
+	d, err := NewKMSDecrypter(keyID)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
 type Passthrough struct{}
 
 func (Passthrough) Decrypt(_ context.Context, ciphertext string) (string, error) {

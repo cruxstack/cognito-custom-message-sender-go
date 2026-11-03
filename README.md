@@ -2,10 +2,11 @@
 
 ## What
 
-An AWS Lambda function that sends policy-driven emails in response to AWS
-Cognito events. It supports AWS SES and SendGrid for delivery, with optional
-SendGrid email verification, automatic failover between providers, and built-in
-email rate limiting.
+An AWS Lambda function that sends policy-driven emails and SMS messages in
+response to AWS Cognito custom sender events. Emails go through AWS SES or
+SendGrid, with optional SendGrid email verification, automatic failover between
+providers, and built-in email rate limiting. SMS messages go through Amazon SNS,
+with a per-phone-number send history the policy can use to throttle.
 
 ## Why
 
@@ -21,8 +22,13 @@ AWS Cognito's built-in email templates are limited. This solution lets you:
   detection)
 - **Rate limit emails** per destination address, per user, and per message
   class, backed by DynamoDB
+- **Send SMS through Amazon SNS** with policy-chosen message text, sender ID,
+  and origination number, and throttle by recent attempts per phone number
 
 ## How It Works
+
+One function can serve both the custom email sender and custom SMS sender
+triggers; it routes each event by its `triggerSource` prefix. The email flow:
 
 1. Cognito triggers the Lambda with a Custom Email Sender event
 2. If rate limiting is enabled, the email is counted and throttled emails stop
@@ -32,6 +38,8 @@ AWS Cognito's built-in email templates are limited. This solution lets you:
    - **Deny**: with a reason (email is not sent)
 4. If allowed, the Lambda decrypts the verification code using KMS
 5. The email is sent via SES or SendGrid
+
+For the SMS flow, see [SMS Sender](#sms-sender).
 
 ## Deployment
 
@@ -44,23 +52,28 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o boo
 ### 2. Package
 
 ```bash
-zip deployment.zip bootstrap policy.rego
+zip deployment.zip bootstrap policy.rego sms-policy.rego
 ```
+
+Include only the policy files for the senders you enable.
 
 ### 3. Deploy
 
 Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
 
 - **IAM permissions**: KMS decrypt, SES send (if using SES), DynamoDB (if
-  rate limiting is enabled)
+  rate limiting or the SMS sender is enabled), SNS publish (if the SMS sender
+  is enabled)
 - **Environment variables**: see table below
-- **Cognito**: set as Custom Email Sender trigger
+- **Cognito**: set as the Custom Email Sender trigger, the Custom SMS Sender
+  trigger, or both
 
 ### Environment Variables
 
 | Variable                                  | Description                                        | Default                      |
 | ----------------------------------------- | -------------------------------------------------- | ---------------------------- |
-| `APP_EMAIL_SENDER_POLICY_PATH`            | Path to the Rego policy file.                      | **required**                 |
+| `APP_EMAIL_SENDER_ENABLED`                | Handle custom email sender events.                 | `true`                       |
+| `APP_EMAIL_SENDER_POLICY_PATH`            | Path to the Rego policy file.                      | **required if email enabled** |
 | `APP_KMS_KEY_ID`                          | KMS key ARN for decrypting Cognito codes.          | **required**                 |
 | `APP_EMAIL_PROVIDER`                      | Email provider: `ses` or `sendgrid`.               | `ses`                        |
 | `APP_SEND_ENABLED`                        | `true` to send emails, `false` for dry-run.        | `true`                       |
@@ -77,6 +90,14 @@ Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
 | `APP_EMAIL_RATE_LIMIT_ENABLED`            | Enable email rate limiting.                        | `false`                      |
 | `APP_EMAIL_RATE_LIMIT_TABLE_NAME`         | DynamoDB table for rate limit counters.            | **required if rate limiting** |
 | `APP_EMAIL_RATE_LIMIT_CONFIG`             | Rate limit settings as JSON (see below).           | built-in defaults            |
+| `APP_SMS_SENDER_ENABLED`                  | Handle custom SMS sender events.                   | `false`                      |
+| `APP_SMS_SENDER_POLICY_PATH`              | Path to the SMS Rego policy file.                  | **required if SMS enabled**  |
+| `APP_SMS_HISTORY_TABLE_NAME`              | DynamoDB table for SMS send history.               | **required if SMS enabled**  |
+| `APP_SMS_HISTORY_TTL`                     | How long history items are kept (Go duration).     | `720h`                       |
+| `APP_SMS_THROTTLE_PERIOD`                 | Window for `history.recentAttempts` (Go duration). | `15m`                        |
+
+At least one of `APP_EMAIL_SENDER_ENABLED` and `APP_SMS_SENDER_ENABLED` must be
+`true`. Events for a disabled sender are logged and ignored.
 
 ## Provider Failover
 
@@ -344,6 +365,157 @@ Throttle logs include the masked address (`u***@example.com`) and its hash.
   window (plus one batch read for global limits), run in parallel after the
   retry check.
 
+## SMS Sender
+
+The SMS sender handles `CustomSMSSender_*` events and sends through Amazon SNS.
+It is a port of the Node.js SMS sender from
+[terraform-aws-cognito-custom-message-sender](https://github.com/cruxstack/terraform-aws-cognito-custom-message-sender),
+and keeps its policy input and output, history table, and code placeholder, so
+existing policies and tables keep working.
+
+### How It Works
+
+1. The `phone_number` attribute is parsed with libphonenumber metadata. A
+   number that can't be parsed or doesn't map to a country is logged and
+   dropped.
+2. The attempt is saved to the history table, then the attempts to that phone
+   number within `APP_SMS_THROTTLE_PERIOD` are counted, including this one.
+3. The policy evaluates the event and returns `allow` with the message, or any
+   other action (such as `block`) with a reason.
+4. If allowed, the code is decrypted with KMS and replaces the first `{####}`
+   in the message.
+5. The message is published with `sns:Publish`.
+
+History errors are logged and don't stop the send (the count is `0`). Invalid
+phone numbers and policy blocks return success, so Lambda doesn't retry them;
+policy, decryption, and SNS errors return an error, so Lambda retries.
+
+### Policy
+
+The policy is read from `APP_SMS_SENDER_POLICY_PATH` and must define
+`data.cognito_custom_sender_sms_policy.result`. Rego v1 is recommended. Rego v0
+policies, which the Node.js sender required, are still accepted with a warning.
+
+Input:
+
+```jsonc
+{
+  "trigger": "CustomSMSSender_Authentication",
+  "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "1example23456789" },
+  "userAttributes": { "sub": "uuid", "phone_number": "+12065550100", "phone_number_verified": "true" },
+  "clientMetadata": { "key": "value" },
+  "phoneNumberData": {
+    "number": "+12065550100",
+    "country": "US",
+    "countryCallingCode": "1",
+    "nationalNumber": "2065550100",
+    "carrierCode": null,
+    "isValid": true,
+    "isPossible": true
+  },
+  "history": { "recentAttempts": 2 }
+}
+```
+
+Output:
+
+```jsonc
+// send
+{
+  "action": "allow",
+  "allow": {
+    "message": "Your code is: {####}",
+    "messageType": "Transactional", // or "Promotional"; default "Transactional"
+    "senderId": "",                 // optional AWS.SNS.SMS.SenderID
+    "shortCode": ""                 // optional AWS.MM.SMS.OriginationNumber
+  }
+}
+
+// don't send
+{ "action": "block", "block": { "reason": "rate limit exceeded" } }
+```
+
+Example that throttles after five attempts in the throttle period:
+
+```rego
+package cognito_custom_sender_sms_policy
+
+import rego.v1
+
+default result := {
+  "action": "allow",
+  "allow": {"message": "Your code is: {####}", "messageType": "Transactional"},
+}
+
+result := {
+  "action": "block",
+  "block": {"reason": "rate limit exceeded"},
+} if {
+  input.history.recentAttempts > 5
+}
+```
+
+### History Table
+
+The table uses the same layout as the Node.js sender:
+
+| Key                                     | Attributes                                       |
+| --------------------------------------- | ------------------------------------------------ |
+| Table hash and range key                | `historyId` (S), `sentAtEpoch` (N, epoch millis) |
+| `userPhoneNumber-index` (GSI, required) | `userPhoneNumber` (S), `sentAtEpoch` (N)         |
+| `userSid-index` (GSI, optional)         | `userId` (S), `sentAtEpoch` (N)                  |
+
+Each item also stores the trigger, phone number country, email address,
+`sentAt` (ISO 8601), and `ttl` (epoch seconds). Enable TTL on `ttl`. Items
+include the phone number and email address in plain text, because the count is
+queried by phone number.
+
+### IAM Permissions
+
+```json
+[
+  { "Effect": "Allow", "Action": "sns:Publish", "Resource": "*" },
+  { "Effect": "Allow", "Action": "kms:Decrypt", "Resource": "arn:aws:kms:us-east-1:123456789012:key/EXAMPLE" },
+  {
+    "Effect": "Allow",
+    "Action": ["dynamodb:PutItem", "dynamodb:Query"],
+    "Resource": [
+      "arn:aws:dynamodb:us-east-1:123456789012:table/example-sms-history",
+      "arn:aws:dynamodb:us-east-1:123456789012:table/example-sms-history/index/*"
+    ]
+  }
+]
+```
+
+### Migrating from the Node.js Sender
+
+| Node.js variable                 | Go variable                  | Notes                                     |
+| -------------------------------- | ---------------------------- | ----------------------------------------- |
+| `SMS_SENDER_ENABLED`             | `APP_SMS_SENDER_ENABLED`     | Defaults to `false` here.                 |
+| `SMS_SENDER_POLICY_PATH`         | `APP_SMS_SENDER_POLICY_PATH` | A `.rego` file instead of `policy.wasm`.  |
+| `DDB_TABLE_HISTORY_NAME`         | `APP_SMS_HISTORY_TABLE_NAME` |                                           |
+| `DDB_TABLE_HISTORY_TTL`          | `APP_SMS_HISTORY_TTL`        | Go duration instead of minutes.           |
+| `SMS_THROTTLE_PERIOD_IN_MINUTES` | `APP_SMS_THROTTLE_PERIOD`    | Go duration instead of minutes.           |
+| `KMS_KEY_ID`                     | `APP_KMS_KEY_ID`             | `KMS_KEY_ID` still works, with a warning. |
+| `LOG_LEVEL`                      | `APP_LOG_LEVEL`              |                                           |
+
+For an SMS-only function, also set `APP_EMAIL_SENDER_ENABLED=false`. Other
+differences:
+
+- **History TTL:** `ttl` is written in epoch seconds. The Node.js sender wrote
+  epoch milliseconds, which DynamoDB TTL treats as a date far in the future,
+  so those items never expired.
+- **Missing `sub`:** the `userId` attribute is omitted instead of written as an
+  empty string, which DynamoDB rejects for index keys.
+- **Phone validation:** `phoneNumberData.isValid` checks digits against full
+  libphonenumber metadata. The Node.js sender's default metadata only checked
+  length, so its `isValid` matched `isPossible`; policies that block on
+  `isValid` can now block more numbers.
+- **Policy result:** any action other than `allow` blocks the message, and a
+  result without an `action` is an error.
+- **Logs:** phone numbers are masked (`+*******0100`).
+- **Dry run:** `APP_SEND_ENABLED=false` also skips SNS.
+
 ## Writing Policies
 
 The Rego policy receives an `input` object:
@@ -531,10 +703,12 @@ result := {
 ├── internal/
 │   ├── config/         # Environment configuration
 │   ├── encryption/     # KMS decryption
+│   ├── handler/        # Routes events to the email or SMS sender
 │   ├── opa/            # Policy evaluation
 │   ├── providers/      # Email providers (SES, SendGrid)
 │   ├── ratelimit/      # Email rate limiting (DynamoDB and in-memory stores)
-│   ├── sender/         # Core send logic
+│   ├── sender/         # Core email send logic
+│   ├── smssender/      # SMS send logic, phone parsing, history, SNS
 │   ├── types/          # Shared and Cognito event types
 │   └── verifier/       # Email verification
 └── main.go             # Lambda entrypoint
@@ -556,12 +730,12 @@ make test-e2e
 E2E tests are fully offline using:
 - httptest mock server for SendGrid API
 - Passthrough decrypter in place of KMS
-- Mock email provider to capture sends
-- In-memory rate limit store
+- Mock email provider and SMS publisher to capture sends
+- In-memory rate limit store and SMS history
 
-The DynamoDB rate limit store tests run against
+The DynamoDB rate limit store and SMS history tests run against
 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)
-and are skipped unless `RATELIMIT_DYNAMODB_ENDPOINT` is set:
+and are skipped unless `DYNAMODB_LOCAL_ENDPOINT` is set:
 
 ```bash
 docker run --rm -d -p 8000:8000 amazon/dynamodb-local
@@ -576,16 +750,22 @@ Test locally without real credentials:
 # Using make (loads .env automatically)
 make debug
 
+# SMS events with the sample SMS policy
+make debug-sms
+
 # Or with custom fixtures
 go run ./cmd/debug -data path/to/events.json -policy path/to/policy.rego
+go run ./cmd/debug -data path/to/sms-events.json -sms-policy path/to/sms-policy.rego
 ```
 
 Debug mode:
 - Loads `.env` file
 - Mocks KMS decryption when `APP_KMS_KEY_ID=MOCKED_KEY_ID`
-- Dry-runs email sends by default (`APP_SEND_ENABLED=false`)
+- Dry-runs email and SMS sends by default (`APP_SEND_ENABLED=false`)
 - Uses an in-memory rate limit store when rate limiting is enabled without
   `APP_EMAIL_RATE_LIMIT_TABLE_NAME`
+- Uses an in-memory SMS history when the SMS sender is enabled without
+  `APP_SMS_HISTORY_TABLE_NAME`
 
 | Variable              | Description                            | Default                    |
 | --------------------- | -------------------------------------- | -------------------------- |
