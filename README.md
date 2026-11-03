@@ -124,3 +124,7 @@ tests and conventions.
 | [SMS sender](docs/sms.md)                      | SMS history, phone numbers, migrating from Node.js.       |
 | [Architecture](docs/architecture.md)           | Packages, the request flow, and failure handling.         |
 | [Upgrading to v3](docs/upgrading-to-v3.md)     | Breaking changes from v2.                                 |
+
+## License
+
+[MIT](LICENSE)
