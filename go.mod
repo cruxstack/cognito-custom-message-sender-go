@@ -6,10 +6,13 @@ require (
 	github.com/aws/aws-lambda-go v1.55.1
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/config v1.33.13
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/aws/aws-sdk-go-v2/service/ses v1.42.6
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.79.5
+	github.com/aws/aws-sdk-go-v2/service/sns v1.47.7
 	github.com/chainifynet/aws-encryption-sdk-go v0.5.0
 	github.com/joho/godotenv v1.5.1
+	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/open-policy-agent/opa v1.22.0
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 )
@@ -22,6 +25,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.13.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/kms v1.62.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.12.1 // indirect
@@ -58,5 +62,6 @@ require (
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

@@ -6,6 +6,7 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 TEST_FLAGS := -race -count=1
+DYNAMODB_ENDPOINT ?= http://localhost:8000
 .PHONY: build-debug
 build-debug:
 	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "-s -w" -o dist/debug ./cmd/debug
@@ -13,6 +14,10 @@ build-debug:
 .PHONY: debug
 debug:
 	go run ./cmd/debug -data ./fixtures/debug-data.json -policy ./fixtures/debug-policy.rego
+
+.PHONY: debug-sms
+debug-sms:
+	go run ./cmd/debug -data ./fixtures/debug-sms-data.json -sms-policy ./fixtures/sms-policy.rego
 
 .PHONY: test
 test:
@@ -25,3 +30,7 @@ test-unit:
 .PHONY: test-e2e
 test-e2e:
 	$(TEST_ENV) go test $(TEST_FLAGS) ./e2e
+
+.PHONY: test-dynamodb
+test-dynamodb:
+	DYNAMODB_LOCAL_ENDPOINT=$(DYNAMODB_ENDPOINT) $(TEST_ENV) go test $(TEST_FLAGS) -run TestDynamoDB ./internal/ratelimit ./internal/smssender
