@@ -1,10 +1,8 @@
-package aws
+package types
 
 import (
 	"github.com/aws/aws-lambda-go/events"
 )
-
-// structs below used due to bug in aws-lambda-go sdk
 
 type CognitoEventUserPoolsCustomEmailSender struct {
 	events.CognitoEventUserPoolsHeader

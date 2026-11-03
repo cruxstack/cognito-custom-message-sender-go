@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/mail"
 
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
@@ -14,41 +15,17 @@ type Provider interface {
 	Send(ctx context.Context, d *types.EmailData) error
 }
 
-// NewProvider creates a provider based on configuration.
-// If failover is enabled, it creates a FailoverProvider with the primary provider
-// and all failover providers in order.
 func NewProvider(cfg *config.Config) (Provider, error) {
-	// If failover is enabled, create a failover provider chain
-	if cfg.AppEmailFailoverEnabled && len(cfg.AppEmailFailoverProviders) > 0 {
-		return newFailoverProvider(cfg)
+	chain := cfg.ProviderChain()
+	if !cfg.AppEmailFailoverEnabled {
+		return createProvider(chain[0], cfg)
 	}
 
-	// Single provider mode
-	return createProvider(cfg.AppEmailProvider, cfg)
-}
-
-// newFailoverProvider creates a FailoverProvider with the primary provider first,
-// followed by all configured failover providers.
-func newFailoverProvider(cfg *config.Config) (Provider, error) {
-	// Build list of all providers: primary first, then failover providers
-	providerNames := append([]string{cfg.AppEmailProvider}, cfg.AppEmailFailoverProviders...)
-
-	// Deduplicate while preserving order
-	seen := make(map[string]bool)
-	var uniqueNames []string
-	for _, name := range providerNames {
-		if !seen[name] {
-			seen[name] = true
-			uniqueNames = append(uniqueNames, name)
-		}
-	}
-
-	// Create provider instances
-	var providers []Provider
-	for _, name := range uniqueNames {
+	providers := make([]Provider, 0, len(chain))
+	for _, name := range chain {
 		p, err := createProvider(name, cfg)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create provider %s: %w", name, err)
+			return nil, err
 		}
 		providers = append(providers, p)
 	}
@@ -56,7 +33,6 @@ func newFailoverProvider(cfg *config.Config) (Provider, error) {
 	return NewFailoverProvider(providers), nil
 }
 
-// createProvider creates a single provider by name.
 func createProvider(name string, cfg *config.Config) (Provider, error) {
 	switch name {
 	case "sendgrid":
@@ -68,19 +44,16 @@ func createProvider(name string, cfg *config.Config) (Provider, error) {
 	}
 }
 
-func MergeTemplateData(base, additional map[string]any) map[string]any {
-	if base == nil {
-		base = make(map[string]any)
-	}
-	for k, v := range additional {
-		base[k] = v
-	}
-	return base
+func withCode(data map[string]any, code string) map[string]any {
+	out := make(map[string]any, len(data)+1)
+	maps.Copy(out, data)
+	out["code"] = code
+	return out
 }
 
-func ParseNameAddr(s string) (string, string) {
+func parseNameAddr(s string) (name, address string) {
 	addr, err := mail.ParseAddress(s)
-	if err != nil || addr == nil {
+	if err != nil {
 		return "", s
 	}
 	return addr.Name, addr.Address

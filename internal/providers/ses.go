@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -26,10 +27,8 @@ func NewSESProvider(cfg *config.Config) *SESProvider {
 		DryRun: !cfg.AppSendEnabled,
 	}
 
-	// Only create health checker if failover is enabled
 	if cfg.AppEmailFailoverEnabled {
-		sesv2Client := sesv2.NewFromConfig(*cfg.AWSConfig)
-		p.healthChecker = NewSESHealthChecker(sesv2Client, cfg.AppEmailFailoverCacheTTL)
+		p.healthChecker = NewSESHealthChecker(sesv2.NewFromConfig(*cfg.AWSConfig), cfg.AppEmailFailoverCacheTTL)
 	}
 
 	return p
@@ -40,21 +39,30 @@ func (p *SESProvider) Name() string {
 }
 
 func (p *SESProvider) Send(ctx context.Context, d *types.EmailData) error {
-	d.Providers.SES.TemplateData = MergeTemplateData(d.Providers.SES.TemplateData, map[string]any{"code": d.VerificationCode})
-
-	if p.DryRun {
-		return p.SendDryRun(ctx, d)
+	pd := d.ProviderData(p.Name())
+	if pd == nil {
+		return errors.New("missing ses template config")
 	}
 
-	dataJSON, err := json.Marshal(d.Providers.SES.TemplateData)
+	templateData, err := json.Marshal(withCode(pd.TemplateData, d.VerificationCode))
 	if err != nil {
 		return fmt.Errorf("error marshaling template data: %w", err)
 	}
 
+	if p.DryRun {
+		slog.DebugContext(ctx, "dry-run ses send",
+			"template_id", pd.TemplateID,
+			"template_data", pd.TemplateData,
+			"src_address", d.SourceAddress,
+			"dst_address", d.DestinationAddress,
+		)
+		return nil
+	}
+
 	_, err = p.Client.SendTemplatedEmail(ctx, &ses.SendTemplatedEmailInput{
 		Source:       awssdk.String(d.SourceAddress),
-		Template:     awssdk.String(d.Providers.SES.TemplateID),
-		TemplateData: awssdk.String(string(dataJSON)),
+		Template:     awssdk.String(pd.TemplateID),
+		TemplateData: awssdk.String(string(templateData)),
 		Destination:  &awstypes.Destination{ToAddresses: []string{d.DestinationAddress}},
 	})
 	if err != nil {
@@ -64,25 +72,6 @@ func (p *SESProvider) Send(ctx context.Context, d *types.EmailData) error {
 	return nil
 }
 
-func (p *SESProvider) SendDryRun(ctx context.Context, d *types.EmailData) error {
-	dataJSON, err := json.Marshal(d.Providers.SES.TemplateData)
-	if err != nil {
-		return fmt.Errorf("error marshaling template data: %w", err)
-	}
-
-	slog.DebugContext(ctx, "dry-run ses send",
-		"template_id", d.Providers.SES.TemplateID,
-		"template_data", string(dataJSON),
-		"src_address", d.SourceAddress,
-		"dst_address", d.DestinationAddress,
-	)
-
-	return nil
-}
-
-// IsHealthy implements HealthChecker interface.
-// Returns true if SES sending is enabled for the account.
-// If no health checker is configured (failover disabled), always returns true.
 func (p *SESProvider) IsHealthy(ctx context.Context) bool {
 	if p.healthChecker == nil {
 		return true

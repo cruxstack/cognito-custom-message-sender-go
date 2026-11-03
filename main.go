@@ -2,53 +2,42 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 )
-
-var (
-	s *sender.Sender
-)
-
-func Handler(ctx context.Context, event aws.CognitoEventUserPoolsCustomEmailSender) error {
-	if os.Getenv("APP_DEBUG_MODE") == "true" {
-		evtJson, err := json.Marshal(event)
-		if err != nil {
-			slog.ErrorContext(ctx, "failed to marshal event", "error", err)
-		}
-		slog.DebugContext(ctx, "received event", "event", string(evtJson))
-	}
-
-	err := s.SendEmail(ctx, event)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to send email", "error", err)
-		return err
-	}
-
-	return nil
-}
 
 func main() {
+	var level slog.LevelVar
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: &level})))
+
 	cfg, err := config.New()
 	if err != nil {
 		slog.Error("configuration error", "error", err)
 		os.Exit(1)
 	}
+	level.Set(cfg.AppLogLevel)
 
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.AppLogLevel})
-	slog.SetDefault(slog.New(handler))
-
-	s, err = sender.NewSender(context.Background(), cfg)
+	s, err := sender.NewSender(context.Background(), cfg)
 	if err != nil {
 		slog.Error("failed to initialize sender", "error", err)
 		os.Exit(1)
 	}
 
-	lambda.Start(Handler)
+	lambda.Start(func(ctx context.Context, event types.CognitoEventUserPoolsCustomEmailSender) error {
+		if cfg.DebugMode {
+			slog.DebugContext(ctx, "received event", "event", event)
+		}
+
+		if err := s.SendEmail(ctx, event); err != nil {
+			slog.ErrorContext(ctx, "failed to send email", "error", err)
+			return err
+		}
+
+		return nil
+	})
 }

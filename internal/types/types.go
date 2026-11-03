@@ -18,3 +18,21 @@ type EmailProviderData struct {
 	TemplateID   string         `json:"templateId"`
 	TemplateData map[string]any `json:"templateData"`
 }
+
+func (d *EmailData) ProviderData(provider string) *EmailProviderData {
+	if d.Providers == nil {
+		return nil
+	}
+
+	var pd *EmailProviderData
+	switch provider {
+	case "ses":
+		pd = d.Providers.SES
+	case "sendgrid":
+		pd = d.Providers.SendGrid
+	}
+	if pd == nil || pd.TemplateID == "" {
+		return nil
+	}
+	return pd
+}
