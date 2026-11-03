@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/logging"
 )
 
 const (
@@ -366,7 +368,7 @@ func (l *Limiter) report(ctx context.Context, res *Result, c *check) {
 		"trigger", c.req.Trigger,
 		"decision", res.Decision,
 		"reason", res.Reason,
-		"dst_masked", MaskAddress(c.addr),
+		"dst_masked", logging.MaskEmail(c.addr),
 		"dst_hash", hashOrEmpty(c.addr),
 		"latency_ms", c.latency.Milliseconds(),
 	}

@@ -1,38 +1,73 @@
+// Command bootstrap is the AWS Lambda function for Cognito custom email and
+// SMS sender triggers. Build it for the provided.al2023 runtime:
+//
+//	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -o bootstrap .
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
+	"runtime/debug"
 
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/handler"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/app"
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/config"
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/logging"
 )
+
+// version is set at build time with -ldflags "-X main.version=v3.0.0".
+var version = "dev"
 
 func main() {
 	var level slog.LevelVar
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: &level})))
+	slog.SetDefault(slog.New(logging.NewJSONHandler(os.Stdout, &level)))
 
-	cfg, err := config.New()
-	if err != nil {
-		slog.Error("configuration error", "error", err)
+	if err := run(context.Background(), &level); err != nil {
+		slog.Error("startup failed", "version", version, "error", err)
 		os.Exit(1)
 	}
-	level.Set(cfg.AppLogLevel)
+}
 
-	h, err := handler.New(context.Background(), cfg)
+func run(ctx context.Context, level *slog.LevelVar) error {
+	cfg, err := config.FromEnv()
 	if err != nil {
-		slog.Error("failed to initialize sender", "error", err)
-		os.Exit(1)
+		return err
+	}
+	level.Set(cfg.LogLevel)
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return err
 	}
 
-	lambda.Start(func(ctx context.Context, event json.RawMessage) error {
-		if cfg.DebugMode {
-			slog.DebugContext(ctx, "received event", "event", event)
+	h, err := app.New(ctx, cfg, awsCfg)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("starting",
+		"version", version,
+		"revision", revision(),
+		"email_enabled", cfg.Email.Enabled,
+		"email_providers", cfg.Email.Providers,
+		"sms_enabled", cfg.SMS.Enabled,
+		"send_enabled", cfg.SendEnabled,
+	)
+	lambda.Start(h.Handle)
+	return nil
+}
+
+// revision returns the VCS revision the binary was built from, if known.
+func revision() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
 		}
-
-		return h.Handle(ctx, event)
-	})
+	}
+	return "unknown"
 }

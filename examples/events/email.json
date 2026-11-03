@@ -1,0 +1,115 @@
+[
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "8a1b2c3d-0000-4000-8000-000000000001",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "web-app-client-id" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "123456",
+      "clientMetadata": { "locale": "en" },
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000001",
+        "cognito:user_status": "UNCONFIRMED",
+        "email": "emma@example.com",
+        "email_verified": "false"
+      }
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_ForgotPassword",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "8a1b2c3d-0000-4000-8000-000000000002",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "mobile-app-client-id" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "234567",
+      "clientMetadata": {},
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000002",
+        "cognito:user_status": "CONFIRMED",
+        "email": "eli@example.com",
+        "email_verified": "true"
+      }
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_Authentication",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "8a1b2c3d-0000-4000-8000-000000000002",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "unknown-client-id" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "345678",
+      "clientMetadata": {},
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000002",
+        "cognito:user_status": "CONFIRMED",
+        "email": "eli@example.com",
+        "email_verified": "true"
+      }
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_AdminCreateUser",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "ella",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "CLIENT_ID_NOT_APPLICABLE" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "Temp&lt;Pass&gt;1",
+      "clientMetadata": {},
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000003",
+        "cognito:user_status": "FORCE_CHANGE_PASSWORD",
+        "email": "ella@example.com",
+        "email_verified": "true"
+      }
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_AccountTakeOverNotification",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "8a1b2c3d-0000-4000-8000-000000000002",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "web-app-client-id" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "",
+      "clientMetadata": null,
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000002",
+        "email": "eli@example.com",
+        "email_verified": "true"
+      }
+    }
+  },
+  {
+    "version": "1",
+    "triggerSource": "CustomEmailSender_SignUp",
+    "region": "us-east-1",
+    "userPoolId": "us-east-1_EXAMPLE",
+    "userName": "8a1b2c3d-0000-4000-8000-000000000004",
+    "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "web-app-client-id" },
+    "request": {
+      "type": "customEmailSenderRequestV1",
+      "code": "456789",
+      "clientMetadata": {},
+      "userAttributes": {
+        "sub": "8a1b2c3d-0000-4000-8000-000000000004",
+        "cognito:user_status": "UNCONFIRMED",
+        "email": "typo@localhost",
+        "email_verified": "false"
+      }
+    }
+  }
+]

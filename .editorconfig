@@ -22,5 +22,6 @@ indent_size = 4
 indent_style = tab
 indent_size = unset
 
-[**/*.py]
-indent_size = 4
+[*.rego]
+indent_style = tab
+indent_size = unset

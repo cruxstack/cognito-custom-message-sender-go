@@ -1,780 +1,123 @@
 # Cognito Custom Message Sender
 
-## What
-
-An AWS Lambda function that sends policy-driven emails and SMS messages in
-response to AWS Cognito custom sender events. Emails go through AWS SES or
-SendGrid, with optional SendGrid email verification, automatic failover between
-providers, and built-in email rate limiting. SMS messages go through Amazon SNS,
-with a per-phone-number send history the policy can use to throttle.
-
-## Why
-
-AWS Cognito's built-in email templates are limited. This solution lets you:
-
-- **Share a single user pool across multiple sites/apps** while sending
-  site-specific emails based on client ID
-- **Use dynamic email templates** with custom data driven by OPA/Rego policies
-- **Choose your email provider** (SES or SendGrid) per deployment
-- **Automatic failover** between providers when SES is suspended or unavailable
-- **Validate email addresses** before sending (built-in RFC 5322 format
-  validation, or SendGrid's API for advanced checks like disposable/role-based
-  detection)
-- **Rate limit emails** per destination address, per user, and per message
-  class, backed by DynamoDB
-- **Send SMS through Amazon SNS** with policy-chosen message text, sender ID,
-  and origination number, and throttle by recent attempts per phone number
-
-## How It Works
-
-One function can serve both the custom email sender and custom SMS sender
-triggers; it routes each event by its `triggerSource` prefix. The email flow:
-
-1. Cognito triggers the Lambda with a Custom Email Sender event
-2. If rate limiting is enabled, the email is counted and throttled emails stop
-   here (see [Email Rate Limiting](#email-rate-limiting))
-3. An OPA/Rego policy evaluates the event and returns:
-   - **Allow**: with template ID, template data, and addresses
-   - **Deny**: with a reason (email is not sent)
-4. If allowed, the Lambda decrypts the verification code using KMS
-5. The email is sent via SES or SendGrid
-
-For the SMS flow, see [SMS Sender](#sms-sender).
-
-## Deployment
-
-### 1. Build
-
-```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bootstrap main.go
-```
-
-### 2. Package
-
-```bash
-zip deployment.zip bootstrap policy.rego sms-policy.rego
-```
-
-Include only the policy files for the senders you enable.
-
-### 3. Deploy
-
-Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
-
-- **IAM permissions**: KMS decrypt, SES send (if using SES), DynamoDB (if
-  rate limiting or the SMS sender is enabled), SNS publish (if the SMS sender
-  is enabled)
-- **Environment variables**: see table below
-- **Cognito**: set as the Custom Email Sender trigger, the Custom SMS Sender
-  trigger, or both
-
-### Environment Variables
-
-| Variable                                  | Description                                        | Default                      |
-| ----------------------------------------- | -------------------------------------------------- | ---------------------------- |
-| `APP_EMAIL_SENDER_ENABLED`                | Handle custom email sender events.                 | `true`                       |
-| `APP_EMAIL_SENDER_POLICY_PATH`            | Path to the Rego policy file.                      | **required if email enabled** |
-| `APP_KMS_KEY_ID`                          | KMS key ARN for decrypting Cognito codes.          | **required**                 |
-| `APP_EMAIL_PROVIDER`                      | Email provider: `ses` or `sendgrid`.               | `ses`                        |
-| `APP_SEND_ENABLED`                        | `true` to send emails, `false` for dry-run.        | `true`                       |
-| `APP_LOG_LEVEL`                           | Log level: `debug`, `info`, `warn`, `error`.       | `info`                       |
-| `APP_EMAIL_VERIFICATION_ENABLED`          | `false` to disable email verification.             | `true`                       |
-| `APP_EMAIL_VERIFICATION_PROVIDER`         | Verification provider: `sendgrid` or `offline`.    | `offline`                    |
-| `APP_EMAIL_VERIFICATION_WHITELIST`        | Comma-separated domains that skip verification.    | `""`                         |
-| `APP_SENDGRID_API_HOST`                   | SendGrid API base URL.                             | `https://api.sendgrid.com`   |
-| `APP_SENDGRID_EMAIL_SEND_API_KEY`         | SendGrid API key for sending.                      | **required if sendgrid**     |
-| `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` | SendGrid API key for verification.                 | **required if sendgrid verification** |
-| `APP_EMAIL_FAILOVER_ENABLED`              | Enable automatic provider failover.                | `false`                      |
-| `APP_EMAIL_FAILOVER_PROVIDERS`            | Comma-separated failover providers (e.g., `sendgrid`). | **required if failover**  |
-| `APP_EMAIL_FAILOVER_CACHE_TTL`            | Health check cache duration (Go duration format).  | `30s`                        |
-| `APP_EMAIL_RATE_LIMIT_ENABLED`            | Enable email rate limiting.                        | `false`                      |
-| `APP_EMAIL_RATE_LIMIT_TABLE_NAME`         | DynamoDB table for rate limit counters.            | **required if rate limiting** |
-| `APP_EMAIL_RATE_LIMIT_CONFIG`             | Rate limit settings as JSON (see below).           | built-in defaults            |
-| `APP_SMS_SENDER_ENABLED`                  | Handle custom SMS sender events.                   | `false`                      |
-| `APP_SMS_SENDER_POLICY_PATH`              | Path to the SMS Rego policy file.                  | **required if SMS enabled**  |
-| `APP_SMS_HISTORY_TABLE_NAME`              | DynamoDB table for SMS send history.               | **required if SMS enabled**  |
-| `APP_SMS_HISTORY_TTL`                     | How long history items are kept (Go duration).     | `720h`                       |
-| `APP_SMS_THROTTLE_PERIOD`                 | Window for `history.recentAttempts` (Go duration). | `15m`                        |
-
-At least one of `APP_EMAIL_SENDER_ENABLED` and `APP_SMS_SENDER_ENABLED` must be
-`true`. Events for a disabled sender are logged and ignored.
-
-## Provider Failover
-
-AWS can suspend SES sending at any time for compliance reasons. Enable automatic
-failover to ensure emails continue to be delivered via an alternative provider.
-
-### How It Works
-
-1. Before each send, the system checks SES account status via the `GetAccount` API
-2. The result is cached (default 30s) to avoid excessive API calls
-3. If SES is unhealthy (`SendingEnabled=false`), it fails over to the next provider
-4. If a provider fails to send, it tries the next one in the chain
-5. If all providers fail, a warning is logged (no Lambda retry to avoid cascading failures)
-
-### Configuration Example
-
-```bash
-# Primary provider
-APP_EMAIL_PROVIDER=ses
-
-# Enable failover with SendGrid as backup
-APP_EMAIL_FAILOVER_ENABLED=true
-APP_EMAIL_FAILOVER_PROVIDERS=sendgrid
-APP_EMAIL_FAILOVER_CACHE_TTL=30s
-
-# SendGrid credentials (required when in failover chain)
-APP_SENDGRID_EMAIL_SEND_API_KEY=SG.xxxx
-```
-
-### Policy Requirements
-
-When failover is enabled, your policy **must** return template configurations for
-all providers in the failover chain. If a provider's config is missing, it will
-be skipped with a warning.
-
-```rego
-result := {
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email,
-    "providers": {
-      "ses": {
-        "templateId": "ses-verification-template",
-        "templateData": {"appName": "MyApp"}
-      },
-      "sendgrid": {
-        "templateId": "d-abc123def456",
-        "templateData": {"appName": "MyApp"}
-      }
-    }
-  }
-}
-```
-
-### IAM Permissions
-
-When failover is enabled, add SESv2 `GetAccount` permission:
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["ses:SendTemplatedEmail", "sesv2:GetAccount"],
-  "Resource": "*"
-}
-```
-
-## Email Rate Limiting
-
-Rate limiting caps how many emails one address, one user, or one message class
-can receive in a time window. It is off by default.
-
-### Why
-
-With passwordless sign-in (`USER_AUTH` with `EMAIL_OTP`), anyone who has a
-public app client ID can make Cognito send a code to any registered address.
-Repeated requests can flood an inbox, add email provider cost, and hurt the
-sender's reputation.
-
-- Cognito's built-in cap is per requester IP: "Email MFA messages sent to one
-  email address hourly per requester IP address: 5-20"
-  ([quotas](https://docs.aws.amazon.com/cognito/latest/developerguide/quotas.html)).
-  Requests from many IPs are not capped together.
-- AWS WAF rate-based rules can't count by a field in a JSON request body, so
-  they can't count by destination address.
-- The custom email sender sees every email Cognito sends, with the destination
-  address, whatever the client or IP.
-
-### How It Works
-
-For each event, the Lambda:
-
-1. **Classifies** the trigger into a message class.
-2. **Checks exemptions** (exempt classes and domains are sent without counting).
-3. **Detects retries** with a conditional write keyed on the SHA-256 of the
-   encrypted code. Lambda retries carry the same ciphertext, so a retry is sent
-   without being counted again.
-4. **Increments counters** in DynamoDB with atomic `UpdateItem` `ADD` calls,
-   run in parallel. Throttled attempts still count.
-5. **Decides**. A throttled email is logged and dropped, and the function
-   returns success.
-
-Cognito invokes the custom email sender asynchronously
-([Lambda triggers](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-working-with-lambda-triggers.html)),
-so the function can't fail or change the Cognito API call. The caller always
-sees "code sent", including when the email is throttled.
-
-| Class             | Trigger sources                                                        | Default destination limits |
-| ----------------- | ---------------------------------------------------------------------- | -------------------------- |
-| `authentication`  | `CustomEmailSender_Authentication`                                     | 5 per 15m, 20 per 24h      |
-| `signup`          | `CustomEmailSender_SignUp`, `CustomEmailSender_ResendCode`             | 3 per 1h, 10 per 24h       |
-| `forgot_password` | `CustomEmailSender_ForgotPassword`                                     | 5 per 1h                   |
-| `attribute`       | `CustomEmailSender_UpdateUserAttribute`, `_VerifyUserAttribute`        | 5 per 1h                   |
-| `notification`    | `CustomEmailSender_AccountTakeOverNotification`                        | 3 per 1h                   |
-| `admin`           | `CustomEmailSender_AdminCreateUser`                                    | exempt                     |
-
-Unknown trigger sources are sent, logged, and reported with class `unknown`.
-
-### Limits
-
-- **Destination limits** count per normalized address. Addresses are trimmed
-  and lowercased, `+tag` suffixes are removed, and dots are removed from Gmail
-  local parts (`googlemail.com` is treated as `gmail.com`). Counter keys use
-  the SHA-256 of the normalized address; the address itself is never stored.
-- **User limits** (optional) count per user, keyed on the `sub` attribute or
-  the Cognito `userName`, hashed the same way.
-- **Global limits** (optional) count all emails in a class. In `count` mode
-  (the default) they log and emit a metric but never block. In `enforce` mode
-  they throttle. Global counters are split across shards that are summed on
-  read, so a burst doesn't overload one DynamoDB item.
-- **Priority degrade**: in `enforce` mode, once a class's global count passes
-  `degradeFraction` of its max, low-trust recipients are throttled first. A
-  recipient is low trust when `cognito:user_status` is `UNCONFIRMED` or
-  `email_verified` isn't `"true"`. Cognito doesn't document which attributes
-  each trigger includes, so a missing `email_verified` counts as unverified.
-
-Windows are fixed and aligned to the Unix epoch (a `24h` window resets at
-00:00 UTC), so up to twice a limit can be sent across a window boundary. An
-email is throttled when its count, including itself, is greater than `max`.
-
-### Configuration
-
-Set `APP_EMAIL_RATE_LIMIT_ENABLED=true` and
-`APP_EMAIL_RATE_LIMIT_TABLE_NAME`. `APP_EMAIL_RATE_LIMIT_CONFIG` is optional
-JSON that overrides the defaults. Fields you omit keep their defaults, but an
-entry under `classes` replaces that class's defaults entirely. The config is
-validated at startup, and an invalid config stops the Lambda from starting.
-When rate limiting is disabled the config isn't read.
-
-| Field                    | Description                                                                    | Default                      |
-| ------------------------ | ------------------------------------------------------------------------------ | ---------------------------- |
-| `failMode`               | `open` sends when DynamoDB fails; `closed` drops the email.                    | `open`                       |
-| `timeout`                | Deadline for all rate limit calls per email (Go duration, at most `10s`).      | `1s`                         |
-| `dedupeTtl`              | How long retry markers are kept (Go duration, at least `1m`).                  | `6h`                         |
-| `metricNamespace`        | CloudWatch namespace for metrics.                                              | `CognitoCustomMessageSender` |
-| `userKey`                | User limit key: `sub` or `userName`.                                           | `sub`                        |
-| `normalize.stripPlusTag` | Remove `+tag` from the local part.                                             | `true`                       |
-| `normalize.stripGmailDots` | Remove dots from Gmail local parts.                                          | `true`                       |
-| `exempt.domains`         | Destination domains that are never counted (exact match).                      | `[]`                         |
-| `exempt.classes`         | Classes that are never counted.                                                | `["admin"]`                  |
-| `global.mode`            | Global limit mode: `count` or `enforce`.                                       | `count`                      |
-| `global.shards`          | Shards per global counter (1-100).                                             | `4`                          |
-| `global.degradeFraction` | Fraction of a global max where low-trust recipients are throttled (0-1].       | `0.8`                        |
-| `classes.<class>.destination` | List of `{"window", "max"}` limits per address.                           | see table above              |
-| `classes.<class>.user`   | List of `{"window", "max"}` limits per user.                                   | `[]`                         |
-| `classes.<class>.global` | List of `{"window", "max"}` limits for the whole class.                        | `[]`                         |
-| `classes.<class>.globalMode` | Overrides `global.mode` for one class.                                     | unset                        |
-
-A window is a positive integer followed by `s`, `m`, `h`, or `d` (for example
-`15m`, `24h`, `7d`). `max` must be a positive integer, and windows can't repeat
-within one list.
-
-```json
-{
-  "failMode": "open",
-  "metricNamespace": "CognitoCustomMessageSender",
-  "exempt": { "domains": ["example.com"], "classes": ["admin"] },
-  "global": { "mode": "enforce", "shards": 4, "degradeFraction": 0.8 },
-  "classes": {
-    "authentication": {
-      "destination": [{ "window": "15m", "max": 5 }, { "window": "24h", "max": 20 }],
-      "user": [{ "window": "1h", "max": 10 }],
-      "global": [{ "window": "1h", "max": 5000 }]
-    },
-    "signup": {
-      "destination": [{ "window": "1h", "max": 3 }, { "window": "24h", "max": 10 }],
-      "global": [{ "window": "1h", "max": 1000 }],
-      "globalMode": "count"
-    }
-  }
-}
-```
-
-Global limits have no defaults because they depend on normal traffic. Run in
-`count` mode first, then set a max above the observed peak before switching to
-`enforce`.
-
-### Retries and Failures
-
-- **Retries:** the first attempt is counted; Lambda retries of the same event
-  are sent without counting again. Events with no code (account takeover
-  notifications) are counted on every attempt.
-- **Store errors:** if DynamoDB errors, throttles, or exceeds `timeout`, the
-  email is sent (`failMode: open`) or dropped (`failMode: closed`), and the
-  error is logged. A limit that is known to be exceeded still throttles when
-  another counter fails.
-- **Throttles never return an error,** so Lambda doesn't retry them.
-
-Cognito codes expire within minutes, so a late email is rarely useful. Consider
-lowering the function's asynchronous retry settings
-([`maximum_event_age_in_seconds`, `maximum_retry_attempts`](https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html)).
-
-### DynamoDB Table
-
-The table needs a string partition key named `pk` and TTL enabled on the `ttl`
-attribute. On-demand capacity is recommended. Items are small counters and
-retry markers that expire one hour after their window ends.
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["dynamodb:UpdateItem", "dynamodb:PutItem", "dynamodb:BatchGetItem"],
-  "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/cognito-email-rate-limit"
-}
-```
-
-### Metrics
-
-Each email writes one [CloudWatch Embedded Metric Format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format_Specification.html)
-record to the function's log, so metrics need no extra API calls. Records are
-written at any `APP_LOG_LEVEL`. Dimensions are `class` and `decision`; no
-dimension identifies an address.
-
-| Metric                         | Description                                                                   |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `EmailRateLimitDecision`       | One per email, by class and decision.                                         |
-| `EmailRateLimitGlobalExceeded` | Emails that global limits throttle (`enforce`) or would throttle (`count`).   |
-
-| Decision                | Meaning                                                        |
-| ----------------------- | -------------------------------------------------------------- |
-| `sent`                  | Within limits. The policy can still deny the email.            |
-| `throttled_destination` | Dropped: a destination limit was exceeded.                     |
-| `throttled_user`        | Dropped: a user limit was exceeded.                            |
-| `throttled_global`      | Dropped: a global limit or priority degrade applied.           |
-| `deduped`               | A Lambda retry; sent without counting.                         |
-| `exempt`                | Exempt class or domain, or unknown trigger; sent.              |
-| `fail_open`             | The store failed; sent.                                        |
-| `fail_closed`           | The store failed; dropped.                                     |
-
-Throttle logs include the masked address (`u***@example.com`) and its hash.
-
-### Trade-offs
-
-- A throttled recipient gets no email, while the API call that triggered it
-  still succeeds. Users who request many codes may need to wait for the window
-  to reset.
-- Fixed windows allow short bursts at window boundaries.
-- Each window is counted independently. When many emails to one address
-  arrive at the same moment, an attempt can be within one window's limit but
-  over another's, so a burst can send fewer emails than the smallest limit. It
-  never sends more.
-- Address hashes are unsalted SHA-256, so someone with table access can test
-  whether a known address appears.
-- Each counted email adds one conditional write and one update per configured
-  window (plus one batch read for global limits), run in parallel after the
-  retry check.
-
-## SMS Sender
-
-The SMS sender handles `CustomSMSSender_*` events and sends through Amazon SNS.
-It is a port of the Node.js SMS sender from
-[terraform-aws-cognito-custom-message-sender](https://github.com/cruxstack/terraform-aws-cognito-custom-message-sender),
-and keeps its policy input and output, history table, and code placeholder, so
-existing policies and tables keep working.
-
-### How It Works
-
-1. The `phone_number` attribute is parsed with libphonenumber metadata. A
-   number that can't be parsed or doesn't map to a country is logged and
-   dropped.
-2. The attempt is saved to the history table, then the attempts to that phone
-   number within `APP_SMS_THROTTLE_PERIOD` are counted, including this one.
-3. The policy evaluates the event and returns `allow` with the message, or any
-   other action (such as `block`) with a reason.
-4. If allowed, the code is decrypted with KMS and replaces the first `{####}`
-   in the message.
-5. The message is published with `sns:Publish`.
-
-History errors are logged and don't stop the send (the count is `0`). Invalid
-phone numbers and policy blocks return success, so Lambda doesn't retry them;
-policy, decryption, and SNS errors return an error, so Lambda retries.
-
-### Policy
-
-The policy is read from `APP_SMS_SENDER_POLICY_PATH` and must define
-`data.cognito_custom_sender_sms_policy.result`. Rego v1 is recommended. Rego v0
-policies, which the Node.js sender required, are still accepted with a warning.
-
-Input:
-
-```jsonc
-{
-  "trigger": "CustomSMSSender_Authentication",
-  "callerContext": { "awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "1example23456789" },
-  "userAttributes": { "sub": "uuid", "phone_number": "+12065550100", "phone_number_verified": "true" },
-  "clientMetadata": { "key": "value" },
-  "phoneNumberData": {
-    "number": "+12065550100",
-    "country": "US",
-    "countryCallingCode": "1",
-    "nationalNumber": "2065550100",
-    "carrierCode": null,
-    "isValid": true,
-    "isPossible": true
-  },
-  "history": { "recentAttempts": 2 }
-}
-```
-
-Output:
-
-```jsonc
-// send
-{
-  "action": "allow",
-  "allow": {
-    "message": "Your code is: {####}",
-    "messageType": "Transactional", // or "Promotional"; default "Transactional"
-    "senderId": "",                 // optional AWS.SNS.SMS.SenderID
-    "shortCode": ""                 // optional AWS.MM.SMS.OriginationNumber
-  }
-}
-
-// don't send
-{ "action": "block", "block": { "reason": "rate limit exceeded" } }
-```
-
-Example that throttles after five attempts in the throttle period:
-
-```rego
-package cognito_custom_sender_sms_policy
-
-import rego.v1
-
-default result := {
-  "action": "allow",
-  "allow": {"message": "Your code is: {####}", "messageType": "Transactional"},
-}
-
-result := {
-  "action": "block",
-  "block": {"reason": "rate limit exceeded"},
-} if {
-  input.history.recentAttempts > 5
-}
-```
-
-### History Table
-
-The table uses the same layout as the Node.js sender:
-
-| Key                                     | Attributes                                       |
-| --------------------------------------- | ------------------------------------------------ |
-| Table hash and range key                | `historyId` (S), `sentAtEpoch` (N, epoch millis) |
-| `userPhoneNumber-index` (GSI, required) | `userPhoneNumber` (S), `sentAtEpoch` (N)         |
-| `userSid-index` (GSI, optional)         | `userId` (S), `sentAtEpoch` (N)                  |
-
-Each item also stores the trigger, phone number country, email address,
-`sentAt` (ISO 8601), and `ttl` (epoch seconds). Enable TTL on `ttl`. Items
-include the phone number and email address in plain text, because the count is
-queried by phone number.
-
-### IAM Permissions
-
-```json
-[
-  { "Effect": "Allow", "Action": "sns:Publish", "Resource": "*" },
-  { "Effect": "Allow", "Action": "kms:Decrypt", "Resource": "arn:aws:kms:us-east-1:123456789012:key/EXAMPLE" },
-  {
-    "Effect": "Allow",
-    "Action": ["dynamodb:PutItem", "dynamodb:Query"],
-    "Resource": [
-      "arn:aws:dynamodb:us-east-1:123456789012:table/example-sms-history",
-      "arn:aws:dynamodb:us-east-1:123456789012:table/example-sms-history/index/*"
-    ]
-  }
-]
-```
-
-### Migrating from the Node.js Sender
-
-| Node.js variable                 | Go variable                  | Notes                                     |
-| -------------------------------- | ---------------------------- | ----------------------------------------- |
-| `SMS_SENDER_ENABLED`             | `APP_SMS_SENDER_ENABLED`     | Defaults to `false` here.                 |
-| `SMS_SENDER_POLICY_PATH`         | `APP_SMS_SENDER_POLICY_PATH` | A `.rego` file instead of `policy.wasm`.  |
-| `DDB_TABLE_HISTORY_NAME`         | `APP_SMS_HISTORY_TABLE_NAME` |                                           |
-| `DDB_TABLE_HISTORY_TTL`          | `APP_SMS_HISTORY_TTL`        | Go duration instead of minutes.           |
-| `SMS_THROTTLE_PERIOD_IN_MINUTES` | `APP_SMS_THROTTLE_PERIOD`    | Go duration instead of minutes.           |
-| `KMS_KEY_ID`                     | `APP_KMS_KEY_ID`             | `KMS_KEY_ID` still works, with a warning. |
-| `LOG_LEVEL`                      | `APP_LOG_LEVEL`              |                                           |
-
-For an SMS-only function, also set `APP_EMAIL_SENDER_ENABLED=false`. Other
-differences:
-
-- **History TTL:** `ttl` is written in epoch seconds. The Node.js sender wrote
-  epoch milliseconds, which DynamoDB TTL treats as a date far in the future,
-  so those items never expired.
-- **Missing `sub`:** the `userId` attribute is omitted instead of written as an
-  empty string, which DynamoDB rejects for index keys.
-- **Phone validation:** `phoneNumberData.isValid` checks digits against full
-  libphonenumber metadata. The Node.js sender's default metadata only checked
-  length, so its `isValid` matched `isPossible`; policies that block on
-  `isValid` can now block more numbers.
-- **Policy result:** any action other than `allow` blocks the message, and a
-  result without an `action` is an error.
-- **Logs:** phone numbers are masked (`+*******0100`).
-- **Dry run:** `APP_SEND_ENABLED=false` also skips SNS.
-
-## Writing Policies
-
-The Rego policy receives an `input` object:
-
-```jsonc
-{
-  "trigger": "CustomEmailSender_SignUp",
-  "callerContext": {
-    "awsSdkVersion": "aws-sdk-unknown-unknown",
-    "clientId": "xxxxxxxxxxxxxxxxxx"
-  },
-  "userAttributes": {
-    "email": "user@example.org",
-    "email_verified": "false",
-    "sub": "uuid"
-  },
-  "clientMetadata": {
-    "key": "value"
-  },
-  // present if APP_EMAIL_VERIFICATION_ENABLED=true
-  "emailVerification": {
-    "valid": true,
-    "score": 0.97,
-    "raw": "{...}"
-  },
-  // present if APP_EMAIL_RATE_LIMIT_ENABLED=true
-  "rateLimit": {
-    "class": "signup",
-    "decision": "sent", // sent, deduped, exempt, or fail_open
-    "reason": "",
-    "exempt": false,
-    "deduped": false,
-    "failOpen": false,
-    "lowTrust": true,
-    "destination": [
-      { "window": "1h", "count": 2, "max": 3, "exceeded": false },
-      { "window": "1d", "count": 2, "max": 10, "exceeded": false }
-    ],
-    "user": [],
-    "global": {
-      "mode": "count",
-      "windows": [{ "window": "1h", "count": 812, "max": 1000, "exceeded": false }],
-      "degraded": true,
-      "wouldThrottle": true
-    }
-  }
-}
-```
-
-Throttled emails never reach the policy. `rateLimit` lets a policy add its own
-deny on top, for example while global limits are in `count` mode. Windows are
-reported in their largest whole unit (`24h` is reported as `1d`). Counts are
-empty when the email was exempt, deduped, or the store failed.
-
-The policy must return `data.cognito_custom_sender_email_policy.result`:
-
-**Allow:**
-
-```json
-{
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.org",
-    "dstAddress": "user@example.org",
-    "providers": {
-      "ses": {
-        "templateId": "your-ses-template",
-        "templateData": { "code": "123456" }
-      },
-      "sendgrid": {
-        "templateId": "d-xxxxxxxxxx",
-        "templateData": { "code": "123456" }
-      }
-    }
-  }
-}
-```
-
-**Deny:**
-
-```json
-{
-  "action": "deny",
-  "reason": "email verification failed"
-}
-```
-
-### Example: Route by Client ID
+An AWS Lambda function for the Amazon Cognito
+[custom email](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-custom-email-sender.html)
+and [custom SMS](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-custom-sms-sender.html)
+sender triggers. A [Rego](https://www.openpolicyagent.org/docs/policy-language)
+policy you write decides, for every message Cognito sends, whether to send it
+and with which template, sender, and provider.
+
+The easiest way to deploy it is the
+[terraform-aws-cognito-custom-message-sender](https://github.com/cruxstack/terraform-aws-cognito-custom-message-sender)
+module.
+
+## Features
+
+- **Policy-driven messages.** Pick templates, branding, and sender addresses
+  by app client, trigger, user attribute, or client metadata, so one user
+  pool can serve several apps. Deny messages you don't want to send.
+- **Email through Amazon SES or SendGrid,** with ordered failover when a
+  provider fails or SES sending is paused.
+- **Email verification** before sending: an offline syntax check, or the
+  SendGrid Email Address Validation API (disposable and role address
+  detection).
+- **Email rate limiting** per address, per user, and per message class,
+  backed by DynamoDB, to stop OTP and sign-up email floods.
+- **SMS through Amazon SNS,** with per-number history for throttling.
+  Policies and tables from the earlier Node.js SMS sender keep working.
+- **Safe by default:** configuration is validated at startup, codes are
+  decrypted only for messages that will be sent, and logs mask personal data.
+
+## How it works
+
+1. Cognito invokes the function with the event and a code encrypted with
+   your KMS key.
+2. For email, optional rate limiting and address verification run first.
+3. Your policy evaluates the event and returns `allow` (with the template to
+   use) or `deny`.
+4. If allowed, the code is decrypted and sent with your template.
 
 ```rego
 package cognito_custom_sender_email_policy
-import rego.v1
 
-templates := {
-  "app-client-id-1": "d-template-for-app1",
-  "app-client-id-2": "d-template-for-app2",
-}
-
-result := {
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email,
-    "providers": {
-      "sendgrid": {
-        "templateId": templates[input.callerContext.clientId],
-        "templateData": {}
-      }
-    }
-  }
-}
-```
-
-### Example: Deny When Global Limits Would Throttle
-
-```rego
-package cognito_custom_sender_email_policy
 import rego.v1
 
 result := {
-  "action": "deny",
-  "reason": "global email rate limit"
-} if {
-  input.rateLimit.global.wouldThrottle
-}
-
-result := {
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email,
-    "providers": {
-      "ses": {
-        "templateId": "verification-template",
-        "templateData": {}
-      }
-    }
-  }
-} if {
-  not input.rateLimit.global.wouldThrottle
+	"action": "allow",
+	"allow": {
+		"srcAddress": "ACME <no-reply@example.com>",
+		"providers": {"ses": {"templateId": "acme-code", "templateData": {"appName": "ACME"}}},
+	},
 }
 ```
 
-### Example: Deny on Failed Email Verification
+The code is added to the template data as `code`. See
+[policies](docs/policies.md) for the full input and result, and
+[`examples/policies`](examples/policies) for tested examples.
 
-```rego
-package cognito_custom_sender_email_policy
-import rego.v1
+## Deploying
 
-result := {
-  "action": "deny",
-  "reason": "invalid email address"
-} if {
-  input.emailVerification != null
-  not input.emailVerification.valid
-}
+### With Terraform
 
-result := {
-  "action": "allow",
-  "allow": {
-    "srcAddress": "noreply@example.com",
-    "dstAddress": input.userAttributes.email,
-    "providers": {
-      "ses": {
-        "templateId": "verification-template",
-        "templateData": {}
-      }
-    }
-  }
-} if {
-  not result.action == "deny"
+```hcl
+module "cognito_message_sender" {
+  source  = "cruxstack/cognito-custom-message-sender/aws"
+  version = "x.x.x" # a version that targets v3 of this function
+
+  email_sender_enabled        = true
+  email_sender_policy_content = file("${path.module}/policy.rego")
 }
 ```
 
----
+### By hand
 
-# Development
+1. Download `bootstrap_linux_arm64.zip` (or `amd64`) from the
+   [latest release](https://github.com/cruxstack/cognito-custom-message-sender-go/releases/latest),
+   or build it with `make build`.
+2. Add your policy to the zip: `zip bootstrap_linux_arm64.zip policy.rego`.
+   (`make package POLICY=policy.rego` builds and zips in one step.)
+3. Create a Lambda function with the `provided.al2023` runtime, the matching
+   architecture, and handler `bootstrap`. Give its role the
+   [IAM permissions](docs/configuration.md#iam-permissions) for the features
+   you use.
+4. Set the [environment variables](docs/configuration.md); at minimum:
 
-## Project Structure
+   ```sh
+   APP_KMS_KEY_ID=arn:aws:kms:us-east-1:111122223333:key/...
+   APP_EMAIL_SENDER_POLICY_PATH=policy.rego
+   ```
 
-```
-├── cmd/debug/          # Debug CLI for local testing
-├── e2e/                # End-to-end tests
-├── fixtures/           # Test data and policies
-├── internal/
-│   ├── config/         # Environment configuration
-│   ├── encryption/     # KMS decryption
-│   ├── handler/        # Routes events to the email or SMS sender
-│   ├── opa/            # Policy evaluation
-│   ├── providers/      # Email providers (SES, SendGrid)
-│   ├── ratelimit/      # Email rate limiting (DynamoDB and in-memory stores)
-│   ├── sender/         # Core email send logic
-│   ├── smssender/      # SMS send logic, phone parsing, history, SNS
-│   ├── types/          # Shared and Cognito event types
-│   └── verifier/       # Email verification
-└── main.go             # Lambda entrypoint
-```
+5. Allow `cognito-idp.amazonaws.com` to invoke the function, and set it as
+   the user pool's `CustomEmailSender` (and `CustomSMSSender`) trigger along
+   with the pool's `KMSKeyID`.
 
-## Running Tests
+## Local development
 
-```bash
-# All tests
-make test
+Evaluate a policy against sample events, with no AWS access:
 
-# Unit tests only
-make test-unit
-
-# E2E tests only
-make test-e2e
+```sh
+go run ./cmd/devtool eval \
+  -email-policy examples/policies/email/route.rego \
+  -events examples/events/email.json
 ```
 
-E2E tests are fully offline using:
-- httptest mock server for SendGrid API
-- Passthrough decrypter in place of KMS
-- Mock email provider and SMS publisher to capture sends
-- In-memory rate limit store and SMS history
+Run events through the whole sender in dry-run mode, with your `.env`:
 
-The DynamoDB rate limit store and SMS history tests run against
-[DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)
-and are skipped unless `DYNAMODB_LOCAL_ENDPOINT` is set:
-
-```bash
-docker run --rm -d -p 8000:8000 amazon/dynamodb-local
-make test-dynamodb
+```sh
+cp .env.example .env
+make run
 ```
 
-## Debug Mode
+`make help` lists the other targets; [CONTRIBUTING](CONTRIBUTING.md) covers
+tests and conventions.
 
-Test locally without real credentials:
+## Documentation
 
-```bash
-# Using make (loads .env automatically)
-make debug
-
-# SMS events with the sample SMS policy
-make debug-sms
-
-# Or with custom fixtures
-go run ./cmd/debug -data path/to/events.json -policy path/to/policy.rego
-go run ./cmd/debug -data path/to/sms-events.json -sms-policy path/to/sms-policy.rego
-```
-
-Debug mode:
-- Loads `.env` file
-- Mocks KMS decryption when `APP_KMS_KEY_ID=MOCKED_KEY_ID`
-- Dry-runs email and SMS sends by default (`APP_SEND_ENABLED=false`)
-- Uses an in-memory rate limit store when rate limiting is enabled without
-  `APP_EMAIL_RATE_LIMIT_TABLE_NAME`
-- Uses an in-memory SMS history when the SMS sender is enabled without
-  `APP_SMS_HISTORY_TABLE_NAME`
-
-| Variable              | Description                            | Default                    |
-| --------------------- | -------------------------------------- | -------------------------- |
-| `APP_DEBUG_MODE`      | Enable debug mode.                     | `false`                    |
-| `APP_DEBUG_DATA_PATH` | Path to JSON file with Cognito events. | `fixtures/debug-data.json` |
-
-## Deprecated Variables
-
-| Deprecated             | Use Instead                               |
-| ---------------------- | ----------------------------------------- |
-| `APP_SENDGRID_API_KEY` | `APP_SENDGRID_EMAIL_VERIFICATION_API_KEY` |
-| `KMS_KEY_ID`           | `APP_KMS_KEY_ID`                          |
+| Document                                       | Covers                                                    |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| [Configuration](docs/configuration.md)         | Environment variables, failover, IAM, Lambda settings.    |
+| [Policies](docs/policies.md)                   | Policy input and result, writing and testing policies.    |
+| [Rate limiting](docs/rate-limiting.md)         | Email rate limits, the DynamoDB table, metrics.           |
+| [SMS sender](docs/sms.md)                      | SMS history, phone numbers, migrating from Node.js.       |
+| [Architecture](docs/architecture.md)           | Packages, the request flow, and failure handling.         |
+| [Upgrading to v3](docs/upgrading-to-v3.md)     | Breaking changes from v2.                                 |

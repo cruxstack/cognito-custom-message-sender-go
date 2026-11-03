@@ -97,19 +97,6 @@ func Hash(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// MaskAddress hides all but the first character of the local part, for
-// example "u***@example.com".
-func MaskAddress(addr string) string {
-	at := strings.LastIndexByte(addr, '@')
-	if at <= 0 {
-		if addr == "" {
-			return ""
-		}
-		return "***"
-	}
-	return addr[:1] + "***" + addr[at:]
-}
-
 // LowTrust reports whether a recipient should be throttled first when a
 // class nears its global limit, along with the reason. A recipient is low
 // trust when the user is unconfirmed or the email address is not verified.

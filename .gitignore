@@ -1,13 +1,13 @@
-!**/.gitkeep
-
-tmp/
-.DS_Store
-
-.local/
-.env
-
+# build output
 dist/
-cognito-custom-message-sender-go
-main
-cli
+coverage.out
 
+# local settings
+.env
+.local/
+tmp/
+
+# worktrees
+.worktrees/
+
+.DS_Store

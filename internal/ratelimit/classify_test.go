@@ -70,21 +70,6 @@ func TestNormalizeAddress(t *testing.T) {
 	}
 }
 
-func TestMaskAddress(t *testing.T) {
-	tests := map[string]string{
-		"user@example.com": "u***@example.com",
-		"u@example.com":    "u***@example.com",
-		"no-at-sign":       "***",
-		"@example.com":     "***",
-		"":                 "",
-	}
-	for in, want := range tests {
-		if got := MaskAddress(in); got != want {
-			t.Errorf("MaskAddress(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestHash(t *testing.T) {
 	h := Hash("user@example.com")
 	if len(h) != 64 || strings.Contains(h, "user") {

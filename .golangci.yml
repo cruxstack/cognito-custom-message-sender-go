@@ -1,0 +1,55 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - sloglint
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - io.WriteString
+    revive:
+      rules:
+        - name: exported
+          disabled: true # internal packages; doc comments where they help
+        - name: package-comments
+          disabled: true
+    sloglint:
+      kv-only: true
+      key-naming-case: snake
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # embedded metric format records need cloudwatch's key names
+      - path: internal/ratelimit/metrics\.go
+        linters:
+          - sloglint
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unparam
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/cruxstack/cognito-custom-message-sender-go

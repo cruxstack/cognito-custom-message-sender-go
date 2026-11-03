@@ -1,172 +1,67 @@
 package e2e
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"sync"
+	"slices"
 	"testing"
-	"time"
 
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/handler"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/opa"
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/smssender"
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/cognito"
 )
 
-// MockSMSPublisher captures sent SMS for verification in tests
-type MockSMSPublisher struct {
-	mu   sync.Mutex
-	Sent []smssender.Message
-}
-
-func (p *MockSMSPublisher) Publish(_ context.Context, m smssender.Message) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.Sent = append(p.Sent, m)
-	return nil
-}
-
-func (p *MockSMSPublisher) Count() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.Sent)
-}
-
-func createTestSMSSender(t *testing.T, policyPath string, publisher smssender.Publisher) (*smssender.Sender, *smssender.MemoryHistory) {
-	t.Helper()
-
-	policy, err := opa.ReadPolicy(policyPath)
-	if err != nil {
-		t.Fatalf("failed to read policy: %v", err)
-	}
-	pp, err := smssender.PreparePolicy(context.Background(), policy)
-	if err != nil {
-		t.Fatalf("failed to prepare policy: %v", err)
-	}
-
-	cfg := testConfig(t, "", false)
-	cfg.AppSMSSenderEnabled = true
-	cfg.AppSMSThrottlePeriod = 15 * time.Minute
-	cfg.AppSMSHistoryTTL = 24 * time.Hour
-
-	history := smssender.NewMemoryHistory()
-	return &smssender.Sender{
-		Config:         cfg,
-		Decrypter:      encryption.Passthrough{},
-		PreparedPolicy: pp,
-		History:        history,
-		Publisher:      publisher,
-	}, history
-}
-
-func rawEvent(t *testing.T, v any) json.RawMessage {
-	t.Helper()
-	bs, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return bs
-}
-
-func smsEvent(trigger, phone, code string) map[string]any {
-	return map[string]any{
-		"version":       "1",
-		"triggerSource": trigger,
-		"region":        "us-east-1",
-		"userPoolId":    "us-east-1_EXAMPLE",
-		"userName":      "user-1",
-		"callerContext": map[string]string{"awsSdkVersion": "aws-sdk-unknown-unknown", "clientId": "xxxx1111"},
-		"request": map[string]any{
-			"type": "customSMSSenderRequestV1",
-			"code": code,
-			"userAttributes": map[string]any{
-				"sub":                   "00000000-0000-0000-0000-000000000000",
-				"phone_number":          phone,
-				"phone_number_verified": "true",
-			},
-		},
+func smsVars() map[string]string {
+	return map[string]string{
+		"APP_SMS_SENDER_ENABLED":     "true",
+		"APP_SMS_SENDER_POLICY_PATH": policies + "sms/throttle.rego",
+		"APP_SMS_HISTORY_TABLE_NAME": "history",
 	}
 }
 
-func TestHandler_ServesEmailAndSMS(t *testing.T) {
-	mockSendGrid := NewSendGridMockServer()
-	defer mockSendGrid.Close()
+func TestSMS_OneFunctionServesEmailAndSMS(t *testing.T) {
+	e := newEnv(t, smsVars())
 
-	emailProvider := &MockProvider{}
-	emailSender := createTestSender(t, testConfig(t, mockSendGrid.URL(), false), emailProvider)
+	e.mustHandle(emailEvent(cognito.TriggerEmailSignUp, "web-app-client-id", "user@example.com", "111111"))
+	e.mustHandle(smsEvent("CustomSMSSender_SignUp", "+12065550100", "222222"))
 
-	smsPublisher := &MockSMSPublisher{}
-	smsSender, history := createTestSMSSender(t, "../fixtures/sms-policy.rego", smsPublisher)
-
-	h := &handler.Handler{Email: emailSender, SMS: smsSender}
-	ctx := context.Background()
-
-	email := newCognitoEvent("CustomEmailSender_SignUp", "xxxx1111", "user@example.com", "123456")
-	if err := h.Handle(ctx, rawEvent(t, email)); err != nil {
-		t.Fatalf("email: expected no error, got: %v", err)
+	if len(e.ses.emails()) != 1 {
+		t.Errorf("sent %d emails, want 1", len(e.ses.emails()))
 	}
-
-	// the fixture policy blocks after 5 attempts in the throttle period
-	for i := range 7 {
-		e := smsEvent("CustomSMSSender_Authentication", "+12065550100", fmt.Sprintf("65432%d", i))
-		if err := h.Handle(ctx, rawEvent(t, e)); err != nil {
-			t.Fatalf("sms attempt %d: blocks must not return an error, got: %v", i+1, err)
-		}
-	}
-
-	if got := len(emailProvider.GetSentEmails()); got != 1 {
-		t.Errorf("expected 1 email sent, got %d", got)
-	}
-	if got := smsPublisher.Count(); got != 5 {
-		t.Fatalf("expected 5 sms sent before blocking, got %d", got)
-	}
-	if got := len(history.Records()); got != 7 {
-		t.Errorf("expected 7 sms attempts recorded, got %d", got)
-	}
-
-	first := smsPublisher.Sent[0]
-	if first.PhoneNumber != "+12065550100" || first.Body != "Your code is: 654320" || first.MessageType != "Transactional" {
-		t.Errorf("unexpected first sms: %+v", first)
+	if got := e.sns.messages(); !slices.Equal(got, []string{"Your code is: 222222"}) {
+		t.Errorf("sms = %v", got)
 	}
 }
 
-func TestHandler_SMSInvalidPhoneDropped(t *testing.T) {
-	smsPublisher := &MockSMSPublisher{}
-	smsSender, history := createTestSMSSender(t, "../fixtures/sms-policy.rego", smsPublisher)
-	h := &handler.Handler{SMS: smsSender}
-
-	e := smsEvent("CustomSMSSender_SignUp", "not-a-phone-number", "123456")
-	if err := h.Handle(context.Background(), rawEvent(t, e)); err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+func TestSMS_ThrottlesByHistory(t *testing.T) {
+	e := newEnv(t, smsVars())
+	for range 7 {
+		e.mustHandle(smsEvent("CustomSMSSender_Authentication", "+12065550100", "123456"))
 	}
-	if smsPublisher.Count() != 0 || len(history.Records()) != 0 {
-		t.Error("expected an invalid phone number to be dropped without sending or recording")
+	if got := len(e.sns.messages()); got != 5 {
+		t.Errorf("sent %d sms, want 5 before the policy blocks", got)
+	}
+	if got := len(e.history.Records()); got != 7 {
+		t.Errorf("recorded %d attempts, want 7", got)
 	}
 }
 
-func TestHandler_DebugSMSFixture(t *testing.T) {
-	data, err := os.ReadFile("../fixtures/debug-sms-data.json")
-	if err != nil {
-		t.Fatal(err)
+func TestSMS_InvalidPhoneNumberIsDropped(t *testing.T) {
+	e := newEnv(t, smsVars())
+	e.mustHandle(smsEvent("CustomSMSSender_SignUp", "not-a-phone-number", "1"))
+	if len(e.sns.messages()) != 0 {
+		t.Error("invalid phone numbers should not be sent")
 	}
-	var events []json.RawMessage
-	if err := json.Unmarshal(data, &events); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	smsPublisher := &MockSMSPublisher{}
-	smsSender, _ := createTestSMSSender(t, "../fixtures/sms-policy.rego", smsPublisher)
-	h := &handler.Handler{SMS: smsSender}
-
-	for i, e := range events {
-		if err := h.Handle(context.Background(), e); err != nil {
-			t.Fatalf("event %d: %v", i, err)
-		}
+func TestSMS_DisabledSenderIgnoresEvents(t *testing.T) {
+	e := newEnv(t, nil)
+	e.mustHandle(smsEvent("CustomSMSSender_SignUp", "+12065550100", "1"))
+	if len(e.sns.messages()) != 0 {
+		t.Error("sms should not be sent when the sms sender is disabled")
 	}
-	// 7 attempts to one number (5 sent, 2 blocked) and 1 invalid number
-	if got := smsPublisher.Count(); got != 5 {
-		t.Errorf("expected 5 sms sent from the debug fixture, got %d", got)
+}
+
+func TestUnknownTriggerIsIgnored(t *testing.T) {
+	e := newEnv(t, nil)
+	e.mustHandle(emailEvent("CustomMessage_SignUp", "web-app-client-id", "user@example.com", "1"))
+	if len(e.ses.emails()) != 0 {
+		t.Error("unknown triggers should be ignored")
 	}
 }
