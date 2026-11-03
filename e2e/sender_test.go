@@ -3,9 +3,9 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 
@@ -13,12 +13,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/opa"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/verifier"
-
-	awsinternal "github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 )
 
 // MockProvider captures sent emails for verification in tests
@@ -81,17 +80,17 @@ func (p *MockProvider) Reset() {
 type SendGridMockServer struct {
 	Server          *httptest.Server
 	mu              sync.Mutex
-	Responses       map[string]verifier.SendGridEmailEmailAddressValidationResponse
-	DefaultResponse verifier.SendGridEmailEmailAddressValidationResponse
+	Responses       map[string]verifier.SendGridValidationResponse
+	DefaultResponse verifier.SendGridValidationResponse
 	RequestCount    int
 	LastRequest     string
 }
 
 func NewSendGridMockServer() *SendGridMockServer {
 	mock := &SendGridMockServer{
-		Responses: make(map[string]verifier.SendGridEmailEmailAddressValidationResponse),
-		DefaultResponse: verifier.SendGridEmailEmailAddressValidationResponse{
-			Result: verifier.SendGridEmailEmailAddressValidationResult{
+		Responses: make(map[string]verifier.SendGridValidationResponse),
+		DefaultResponse: verifier.SendGridValidationResponse{
+			Result: verifier.SendGridValidationResult{
 				Email:   "test@example.com",
 				Verdict: "Valid",
 				Score:   0.9,
@@ -132,15 +131,15 @@ func NewSendGridMockServer() *SendGridMockServer {
 	return mock
 }
 
-func (m *SendGridMockServer) SetResponse(email string, resp verifier.SendGridEmailEmailAddressValidationResponse) {
+func (m *SendGridMockServer) SetResponse(email string, resp verifier.SendGridValidationResponse) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Responses[email] = resp
 }
 
 func (m *SendGridMockServer) SetInvalidResponse(email string) {
-	m.SetResponse(email, verifier.SendGridEmailEmailAddressValidationResponse{
-		Result: verifier.SendGridEmailEmailAddressValidationResult{
+	m.SetResponse(email, verifier.SendGridValidationResponse{
+		Result: verifier.SendGridValidationResult{
 			Email:   email,
 			Verdict: "Invalid",
 			Score:   0.1,
@@ -177,7 +176,7 @@ func testConfig(t *testing.T, sendGridURL string, emailVerificationEnabled bool)
 
 	return &config.Config{
 		AWSConfig:                       &awscfg,
-		AppKmsKeyId:                     "MOCKED_KEY_ID", // Uses built-in mock
+		AppKmsKeyId:                     encryption.MockKeyID,
 		AppEmailProvider:                "ses",
 		AppEmailSenderPolicyPath:        "../fixtures/debug-policy.rego",
 		AppEmailVerificationEnabled:     emailVerificationEnabled,
@@ -197,7 +196,7 @@ func createTestSender(t *testing.T, cfg *config.Config, provider *MockProvider) 
 		t.Fatalf("failed to read policy: %v", err)
 	}
 
-	preparedPolicy, err := opa.PreparePolicy(context.Background(), policy, "data.cognito_custom_sender_email_policy.result")
+	preparedPolicy, err := opa.PreparePolicy(context.Background(), policy, sender.PolicyQuery)
 	if err != nil {
 		t.Fatalf("failed to prepare policy: %v", err)
 	}
@@ -210,7 +209,7 @@ func createTestSender(t *testing.T, cfg *config.Config, provider *MockProvider) 
 
 	return &sender.Sender{
 		Config:         cfg,
-		KMS:            nil, // Not needed with MOCKED_KEY_ID
+		Decrypter:      encryption.Passthrough{},
 		EmailVerifier:  emailVerifier,
 		PreparedPolicy: preparedPolicy,
 		Provider:       provider,
@@ -218,8 +217,8 @@ func createTestSender(t *testing.T, cfg *config.Config, provider *MockProvider) 
 }
 
 // newCognitoEvent creates a test Cognito event
-func newCognitoEvent(trigger, clientID, email, code string) awsinternal.CognitoEventUserPoolsCustomEmailSender {
-	return awsinternal.CognitoEventUserPoolsCustomEmailSender{
+func newCognitoEvent(trigger, clientID, email, code string) types.CognitoEventUserPoolsCustomEmailSender {
+	return types.CognitoEventUserPoolsCustomEmailSender{
 		CognitoEventUserPoolsHeader: events.CognitoEventUserPoolsHeader{
 			Version:       "1",
 			TriggerSource: trigger,
@@ -231,7 +230,7 @@ func newCognitoEvent(trigger, clientID, email, code string) awsinternal.CognitoE
 			},
 			UserName: email,
 		},
-		Request: awsinternal.CognitoEventUserPoolsCustomEmailSenderRequest{
+		Request: types.CognitoEventUserPoolsCustomEmailSenderRequest{
 			UserAttributes: map[string]any{
 				"email":          email,
 				"email_verified": "false",
@@ -574,14 +573,37 @@ func TestSendEmail_TemplateDataContainsClientID(t *testing.T) {
 	}
 }
 
-// TestMain sets up the test environment
-func TestMain(m *testing.M) {
-	// Set required environment for AWS SDK
-	os.Setenv("AWS_ACCESS_KEY_ID", "test")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "test")
-	os.Setenv("AWS_REGION", "us-east-1")
-	// Enable debug mode for MOCKED_KEY_ID to work
-	os.Setenv("APP_DEBUG_MODE", "true")
+type failingDecrypter struct{}
 
-	os.Exit(m.Run())
+func (failingDecrypter) Decrypt(context.Context, string) (string, error) {
+	return "", errors.New("decrypt should not be called")
+}
+
+func TestSendEmail_EmptyCode_SkipsDecrypt(t *testing.T) {
+	mockSendGrid := NewSendGridMockServer()
+	defer mockSendGrid.Close()
+
+	cfg := testConfig(t, mockSendGrid.URL(), false)
+	provider := &MockProvider{}
+	s := createTestSender(t, cfg, provider)
+	s.Decrypter = failingDecrypter{}
+
+	event := newCognitoEvent(
+		"CustomEmailSender_AccountTakeOverNotification",
+		"xxxx1111",
+		"user@example.com",
+		"",
+	)
+
+	if err := s.SendEmail(context.Background(), event); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	emails := provider.GetSentEmails()
+	if len(emails) != 1 {
+		t.Fatalf("expected 1 email sent, got %d", len(emails))
+	}
+	if emails[0].VerificationCode != "" {
+		t.Errorf("expected empty code, got %q", emails[0].VerificationCode)
+	}
 }

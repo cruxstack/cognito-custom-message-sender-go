@@ -75,15 +75,15 @@ func TestSendGridVerifier_VerifyEmailViaAPI(t *testing.T) {
 	testCases := []struct {
 		name           string
 		email          string
-		serverResponse SendGridEmailEmailAddressValidationResponse
+		serverResponse SendGridValidationResponse
 		expectedValid  bool
 		expectedScore  float32
 	}{
 		{
 			name:  "valid email",
 			email: "valid@example.com",
-			serverResponse: SendGridEmailEmailAddressValidationResponse{
-				Result: SendGridEmailEmailAddressValidationResult{
+			serverResponse: SendGridValidationResponse{
+				Result: SendGridValidationResult{
 					Email:   "valid@example.com",
 					Verdict: "Valid",
 					Score:   0.95,
@@ -95,8 +95,8 @@ func TestSendGridVerifier_VerifyEmailViaAPI(t *testing.T) {
 		{
 			name:  "invalid email",
 			email: "invalid@example.com",
-			serverResponse: SendGridEmailEmailAddressValidationResponse{
-				Result: SendGridEmailEmailAddressValidationResult{
+			serverResponse: SendGridValidationResponse{
+				Result: SendGridValidationResult{
 					Email:   "invalid@example.com",
 					Verdict: "Invalid",
 					Score:   0.1,
@@ -108,8 +108,8 @@ func TestSendGridVerifier_VerifyEmailViaAPI(t *testing.T) {
 		{
 			name:  "risky email",
 			email: "risky@example.com",
-			serverResponse: SendGridEmailEmailAddressValidationResponse{
-				Result: SendGridEmailEmailAddressValidationResult{
+			serverResponse: SendGridValidationResponse{
+				Result: SendGridValidationResult{
 					Email:   "risky@example.com",
 					Verdict: "Risky",
 					Score:   0.5,
@@ -160,11 +160,10 @@ func TestSendGridVerifier_VerifyEmailViaAPI(t *testing.T) {
 	}
 }
 
-func TestSendGridVerifier_VerifyEmailViaWhitelist(t *testing.T) {
+func TestSendGridVerifier_IsWhitelisted(t *testing.T) {
 	v := &SendGridEmailVerifier{
 		Whitelist: []string{"trusted.com", "allowed.org"},
 	}
-	ctx := context.Background()
 
 	testCases := []struct {
 		name        string
@@ -173,6 +172,7 @@ func TestSendGridVerifier_VerifyEmailViaWhitelist(t *testing.T) {
 	}{
 		{"whitelisted domain", "user@trusted.com", true},
 		{"another whitelisted domain", "admin@allowed.org", true},
+		{"domain case insensitive", "user@Trusted.COM", true},
 		{"non-whitelisted domain", "user@untrusted.com", false},
 		{"subdomain not whitelisted", "user@sub.trusted.com", false},
 		{"invalid email format", "not-an-email", false},
@@ -180,21 +180,8 @@ func TestSendGridVerifier_VerifyEmailViaWhitelist(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := v.VerifyEmailViaWhitelist(ctx, tc.email)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tc.expectMatch {
-				if result == nil {
-					t.Errorf("expected whitelist match for %q, got nil", tc.email)
-				} else if !result.IsValid {
-					t.Errorf("expected IsValid=true for whitelisted email")
-				}
-			} else {
-				if result != nil {
-					t.Errorf("expected no whitelist match for %q, got result", tc.email)
-				}
+			if got := v.isWhitelisted(tc.email); got != tc.expectMatch {
+				t.Errorf("isWhitelisted(%q) = %v, want %v", tc.email, got, tc.expectMatch)
 			}
 		})
 	}
@@ -205,8 +192,8 @@ func TestSendGridVerifier_VerifyEmail_WhitelistSkipsAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiCalled = true
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(SendGridEmailEmailAddressValidationResponse{
-			Result: SendGridEmailEmailAddressValidationResult{
+		json.NewEncoder(w).Encode(SendGridValidationResponse{
+			Result: SendGridValidationResult{
 				Verdict: "Valid",
 				Score:   0.9,
 			},
@@ -242,5 +229,8 @@ func TestSendGridVerifier_VerifyEmail_WhitelistSkipsAPI(t *testing.T) {
 	}
 	if !apiCalled {
 		t.Error("API should be called for non-whitelisted domain")
+	}
+	if !result.IsValid {
+		t.Error("expected valid result from API")
 	}
 }

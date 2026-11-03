@@ -1,49 +1,48 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 
-	"github.com/cruxstack/cognito-custom-message-sender-go/internal/aws"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/config"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/encryption"
 	"github.com/cruxstack/cognito-custom-message-sender-go/internal/sender"
+	"github.com/cruxstack/cognito-custom-message-sender-go/internal/types"
 	"github.com/joho/godotenv"
 )
 
-var (
-	dataPath   string
-	policyPath string
-)
-
-func init() {
-	flag.StringVar(&dataPath, "data", "", "path to JSON file with test event data")
-	flag.StringVar(&policyPath, "policy", "", "override path to Rego policy file")
+func main() {
+	dataPath := flag.String("data", "", "path to JSON file with test event data")
+	policyPath := flag.String("policy", "", "override path to Rego policy file")
 	flag.Parse()
+
+	if err := run(context.Background(), *dataPath, *policyPath); err != nil {
+		slog.Error("debug run failed", "error", err)
+		os.Exit(1)
+	}
 }
 
-type DebugConfig struct {
-	config.Config
-	DataPath string
-}
+func run(ctx context.Context, dataPath, policyPath string) error {
+	var level slog.LevelVar
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: &level})))
 
-func NewDebugConfig() (*config.Config, error) {
-	// Load .env file first
-	envpath := filepath.Join("..", "..", ".env")
-	if _, err := os.Stat(envpath); err == nil {
-		_ = godotenv.Load(envpath)
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to load .env: %w", err)
 	}
 
-	// Set debug mode and defaults via environment before config.New() validates
 	os.Setenv("APP_DEBUG_MODE", "true")
 	if os.Getenv("APP_KMS_KEY_ID") == "" {
-		os.Setenv("APP_KMS_KEY_ID", "MOCKED_KEY_ID")
+		os.Setenv("APP_KMS_KEY_ID", encryption.MockKeyID)
 	}
 	if os.Getenv("APP_EMAIL_SENDER_POLICY_PATH") == "" {
-		os.Setenv("APP_EMAIL_SENDER_POLICY_PATH", filepath.Join("..", "..", "fixtures", "debug-policy.rego"))
+		os.Setenv("APP_EMAIL_SENDER_POLICY_PATH", "fixtures/debug-policy.rego")
 	}
 	if policyPath != "" {
 		os.Setenv("APP_EMAIL_SENDER_POLICY_PATH", policyPath)
@@ -51,54 +50,33 @@ func NewDebugConfig() (*config.Config, error) {
 
 	cfg, err := config.New()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	level.Set(cfg.AppLogLevel)
 
-	if cfg.DebugDataPath == "" {
-		cfg.DebugDataPath = filepath.Join("..", "..", "fixtures", "debug-data.json")
-	}
-	if dataPath != "" {
-		cfg.DebugDataPath = dataPath
-	}
-
-	return cfg, nil
-}
-
-func main() {
-	cfg, err := NewDebugConfig()
+	s, err := sender.NewSender(ctx, cfg)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize sender: %w", err)
 	}
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.AppLogLevel})
-	slog.SetDefault(slog.New(handler))
-
-	s, err := sender.NewSender(context.Background(), cfg)
+	dataPath = cmp.Or(dataPath, cfg.DebugDataPath, "fixtures/debug-data.json")
+	data, err := os.ReadFile(dataPath)
 	if err != nil {
-		slog.Error("failed to initialize sender", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to read data file: %w", err)
 	}
 
-	data, err := os.ReadFile(cfg.DebugDataPath)
-	if err != nil {
-		slog.Error("failed to read data file", "path", dataPath, "error", err)
-		os.Exit(1)
-	}
-
-	events := []aws.CognitoEventUserPoolsCustomEmailSender{}
+	var events []types.CognitoEventUserPoolsCustomEmailSender
 	if err := json.Unmarshal(data, &events); err != nil {
-		slog.Error("failed to parse event file", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to parse data file %s: %w", dataPath, err)
 	}
 
 	for i, e := range events {
-		if err := s.SendEmail(context.Background(), e); err != nil {
-			slog.Error("integration test failed", "error", err)
-			os.Exit(1)
+		if err := s.SendEmail(ctx, e); err != nil {
+			return fmt.Errorf("event %d: %w", i, err)
 		}
-		slog.Info("integration iteration passed", "index", i)
+		slog.Info("event processed", "index", i)
 	}
 
-	slog.Info("integration test passed")
+	slog.Info("all events processed", "count", len(events))
+	return nil
 }

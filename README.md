@@ -55,7 +55,7 @@ Deploy as an AWS Lambda with `provided.al2023` runtime. Configure:
 | Variable                                  | Description                                        | Default                      |
 | ----------------------------------------- | -------------------------------------------------- | ---------------------------- |
 | `APP_EMAIL_SENDER_POLICY_PATH`            | Path to the Rego policy file.                      | **required**                 |
-| `APP_KMS_KEY_ID`                          | KMS key ID for decrypting Cognito codes.           | **required**                 |
+| `APP_KMS_KEY_ID`                          | KMS key ARN for decrypting Cognito codes.          | **required**                 |
 | `APP_EMAIL_PROVIDER`                      | Email provider: `ses` or `sendgrid`.               | `ses`                        |
 | `APP_SEND_ENABLED`                        | `true` to send emails, `false` for dry-run.        | `true`                       |
 | `APP_LOG_LEVEL`                           | Log level: `debug`, `info`, `warn`, `error`.       | `info`                       |
@@ -264,14 +264,12 @@ result := {
 ├── e2e/                # End-to-end tests
 ├── fixtures/           # Test data and policies
 ├── internal/
-│   ├── aws/            # AWS SDK wrappers (KMS, SES)
 │   ├── config/         # Environment configuration
 │   ├── encryption/     # KMS decryption
 │   ├── opa/            # Policy evaluation
 │   ├── providers/      # Email providers (SES, SendGrid)
 │   ├── sender/         # Core send logic
-│   ├── templates/      # Template handling
-│   ├── types/          # Shared types
+│   ├── types/          # Shared and Cognito event types
 │   └── verifier/       # Email verification
 └── main.go             # Lambda entrypoint
 ```
@@ -291,7 +289,7 @@ make test-e2e
 
 E2E tests are fully offline using:
 - httptest mock server for SendGrid API
-- Mocked KMS (`APP_KMS_KEY_ID=MOCKED_KEY_ID`)
+- Passthrough decrypter in place of KMS
 - Mock email provider to capture sends
 
 ## Debug Mode

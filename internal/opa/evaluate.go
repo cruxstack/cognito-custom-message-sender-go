@@ -1,4 +1,4 @@
-// package opa provides helpers to evaluate rego policies with the v1 sdk
+// Package opa provides helpers to evaluate rego policies with the v1 sdk
 package opa
 
 import (
@@ -55,19 +55,6 @@ func Evaluate[T any](ctx context.Context, pp *PreparedPolicy, input any) (*T, er
 	}
 
 	return &out, nil
-}
-
-// EvaluatePolicy compiles policy and evaluates a query against input
-// - returns *T where T matches the rego result shape
-// - enforces rego v1 semantics during compilation
-// Deprecated: Use PreparePolicy + Evaluate for better performance
-func EvaluatePolicy[T any](ctx context.Context, policy string, query string, input any) (*T, error) {
-	pp, err := PreparePolicy(ctx, policy, query)
-	if err != nil {
-		return nil, err
-	}
-
-	return Evaluate[T](ctx, pp, input)
 }
 
 func ReadPolicy(path string) (string, error) {

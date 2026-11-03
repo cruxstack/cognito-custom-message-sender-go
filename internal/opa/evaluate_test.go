@@ -3,69 +3,65 @@ package opa
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
-type TestPolicyOutput struct {
-	IsAdmin bool `json:"isAdmin,omitempty"`
+type testPolicyOutput struct {
+	IsAdmin bool `json:"isAdmin"`
 }
 
-func TestEvaluatePolicy(t *testing.T) {
-	policyFile, err := os.CreateTemp("", "test-policy-*.rego")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		policyFile.Close()
-		os.Remove(policyFile.Name())
-	}()
+const testPolicy = `
+package mock_policy
 
-	policy := `
-		package mock_policy
-		result := {
-			"isAdmin": input.user == "admin"
-		}
-    `
-	_, err = policyFile.WriteString(policy)
+result := {"isAdmin": input.user == "admin"}
+`
+
+func TestEvaluate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.rego")
+	if err := os.WriteFile(path, []byte(testPolicy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	policy, err := ReadPolicy(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	policyFile.Close()
+
+	pp, err := PreparePolicy(context.Background(), policy, "data.mock_policy.result")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	testCases := []struct {
 		name     string
-		data     map[string]any
+		input    map[string]any
 		expected bool
 	}{
-		{
-			name:     "allow admin user",
-			data:     map[string]any{"user": "admin"},
-			expected: true,
-		},
-		{
-			name:     "deny non-admin user",
-			data:     map[string]any{"user": "guest"},
-			expected: false,
-		},
-	}
-
-	ctx := context.Background()
-
-	q := "data.mock_policy.result"
-	p, err := ReadPolicy(policyFile.Name())
-	if err != nil {
-		t.Fatal(err)
+		{"allow admin user", map[string]any{"user": "admin"}, true},
+		{"deny non-admin user", map[string]any{"user": "guest"}, false},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := EvaluatePolicy[TestPolicyOutput](ctx, p, q, tc.data)
+			result, err := Evaluate[testPolicyOutput](context.Background(), pp, tc.input)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if result.IsAdmin != tc.expected {
-				t.Errorf("Test case %s failed: expected %v but got %v", tc.name, tc.expected, result)
+				t.Errorf("expected %v, got %v", tc.expected, result.IsAdmin)
 			}
 		})
+	}
+}
+
+func TestEvaluate_UndefinedResult(t *testing.T) {
+	pp, err := PreparePolicy(context.Background(), testPolicy, "data.mock_policy.missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Evaluate[testPolicyOutput](context.Background(), pp, nil); err == nil {
+		t.Error("expected error for undefined result")
 	}
 }
