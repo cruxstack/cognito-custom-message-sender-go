@@ -1,5 +1,6 @@
-// Package ratelimit limits outgoing cognito emails per destination, per user,
-// and per message class using fixed-window counters in a shared store.
+// Package ratelimit limits outgoing cognito emails and SMS per destination,
+// per user, and per message class using fixed-window counters in a shared
+// store.
 package ratelimit
 
 import (
@@ -30,10 +31,31 @@ const (
 	maxShards = 100
 )
 
-// Config is the json document read from APP_EMAIL_RATE_LIMIT_CONFIG. Fields
-// omitted from the document keep their defaults. An entry under classes
-// replaces that class's defaults entirely.
+// Channel is the delivery channel a limiter counts. Each channel has its own
+// classes, defaults, counter keys, and metric names, so email and SMS can
+// share one table.
+type Channel string
+
+const (
+	ChannelEmail Channel = "email"
+	ChannelSMS   Channel = "sms"
+)
+
+// MetricName returns the channel's name for a metric, for example
+// EmailRateLimitDecision.
+func (c Channel) MetricName(metric string) string {
+	if c == ChannelSMS {
+		return "SMS" + metric
+	}
+	return "Email" + metric
+}
+
+// Config is the json document read from APP_EMAIL_RATE_LIMIT_CONFIG or
+// APP_SMS_RATE_LIMIT_CONFIG. Fields omitted from the document keep their
+// defaults. An entry under classes replaces that class's defaults entirely.
 type Config struct {
+	channel Channel
+
 	FailMode        string                 `json:"failMode"`
 	MetricNamespace string                 `json:"metricNamespace"`
 	Timeout         Duration               `json:"timeout"`
@@ -73,33 +95,55 @@ type Limit struct {
 	Max    int64  `json:"max"`
 }
 
-// DefaultConfig returns the limits used when APP_EMAIL_RATE_LIMIT_CONFIG is
+// DefaultConfig returns a channel's limits when its config document is
 // empty. Global limits are unset by default because they depend on the
-// deployment's normal traffic.
-func DefaultConfig() *Config {
-	return &Config{
+// deployment's normal traffic. SMS limits are tighter than email limits
+// because each SMS costs money and SMS pumping fraud targets OTP flows.
+func DefaultConfig(ch Channel) *Config {
+	cfg := &Config{
+		channel:         ch,
 		FailMode:        FailOpen,
 		MetricNamespace: DefaultMetricNamespace,
 		Timeout:         Duration(time.Second),
 		DedupeTTL:       Duration(6 * time.Hour),
 		UserKey:         UserKeySub,
-		Normalize:       NormalizeConfig{StripPlusTag: true, StripGmailDots: true},
 		Exempt:          ExemptConfig{Domains: []string{}, Classes: []string{ClassAdmin}},
 		Global:          GlobalConfig{Mode: ModeCount, Shards: 4, DegradeFraction: 0.8},
-		Classes: map[string]ClassConfig{
-			ClassAuthentication: {Destination: []Limit{{Window(15 * time.Minute), 5}, {Window(24 * time.Hour), 20}}},
-			ClassSignUp:         {Destination: []Limit{{Window(time.Hour), 3}, {Window(24 * time.Hour), 10}}},
-			ClassForgotPassword: {Destination: []Limit{{Window(time.Hour), 5}}},
-			ClassAttribute:      {Destination: []Limit{{Window(time.Hour), 5}}},
-			ClassNotification:   {Destination: []Limit{{Window(time.Hour), 3}}},
-		},
 	}
+
+	if ch == ChannelSMS {
+		cfg.Classes = map[string]ClassConfig{
+			ClassAuthentication: {Destination: []Limit{{Window(15 * time.Minute), 5}, {Window(24 * time.Hour), 10}}},
+			ClassSignUp:         {Destination: []Limit{{Window(time.Hour), 3}, {Window(24 * time.Hour), 5}}},
+			ClassForgotPassword: {Destination: []Limit{{Window(time.Hour), 3}, {Window(24 * time.Hour), 5}}},
+			ClassAttribute:      {Destination: []Limit{{Window(time.Hour), 3}}},
+		}
+		return cfg
+	}
+
+	cfg.Normalize = NormalizeConfig{StripPlusTag: true, StripGmailDots: true}
+	cfg.Classes = map[string]ClassConfig{
+		ClassAuthentication: {Destination: []Limit{{Window(15 * time.Minute), 5}, {Window(24 * time.Hour), 20}}},
+		ClassSignUp:         {Destination: []Limit{{Window(time.Hour), 3}, {Window(24 * time.Hour), 10}}},
+		ClassForgotPassword: {Destination: []Limit{{Window(time.Hour), 5}}},
+		ClassAttribute:      {Destination: []Limit{{Window(time.Hour), 5}}},
+		ClassNotification:   {Destination: []Limit{{Window(time.Hour), 3}}},
+	}
+	return cfg
 }
 
-// ParseConfig applies the json document in raw over the defaults and
-// validates the result. An empty document yields the defaults.
-func ParseConfig(raw string) (*Config, error) {
-	cfg := DefaultConfig()
+// Channel returns the channel the config is for.
+func (c *Config) Channel() Channel {
+	if c.channel == "" {
+		return ChannelEmail
+	}
+	return c.channel
+}
+
+// ParseConfig applies the json document in raw over the channel's defaults
+// and validates the result. An empty document yields the defaults.
+func ParseConfig(ch Channel, raw string) (*Config, error) {
+	cfg := DefaultConfig(ch)
 
 	if strings.TrimSpace(raw) != "" {
 		dec := json.NewDecoder(strings.NewReader(raw))
@@ -125,6 +169,20 @@ var metricNamespacePattern = regexp.MustCompile(`^[A-Za-z0-9._/#: -]{1,255}$`)
 
 func (c *Config) Validate() error {
 	var errs []error
+	ch := c.Channel()
+	classes := ClassesFor(ch)
+
+	if ch != ChannelEmail && ch != ChannelSMS {
+		errs = append(errs, fmt.Errorf("unknown channel %q", ch))
+	}
+	if ch == ChannelSMS {
+		if len(c.Exempt.Domains) > 0 {
+			errs = append(errs, errors.New("exempt.domains applies only to email"))
+		}
+		if c.Normalize.StripPlusTag || c.Normalize.StripGmailDots {
+			errs = append(errs, errors.New("normalize applies only to email"))
+		}
+	}
 
 	if c.FailMode != FailOpen && c.FailMode != FailClosed {
 		errs = append(errs, fmt.Errorf("failMode %q must be %q or %q", c.FailMode, FailOpen, FailClosed))
@@ -154,8 +212,8 @@ func (c *Config) Validate() error {
 	}
 
 	for _, cl := range c.Exempt.Classes {
-		if !slices.Contains(Classes, cl) {
-			errs = append(errs, fmt.Errorf("exempt.classes: unknown class %q", cl))
+		if !slices.Contains(classes, cl) {
+			errs = append(errs, fmt.Errorf("exempt.classes: unknown %s class %q", ch, cl))
 		}
 	}
 
@@ -173,8 +231,8 @@ func (c *Config) Validate() error {
 
 	for _, name := range slices.Sorted(maps.Keys(c.Classes)) {
 		cc := c.Classes[name]
-		if !slices.Contains(Classes, name) {
-			errs = append(errs, fmt.Errorf("classes: unknown class %q", name))
+		if !slices.Contains(classes, name) {
+			errs = append(errs, fmt.Errorf("classes: unknown %s class %q", ch, name))
 			continue
 		}
 		if cc.GlobalMode != "" && !isValidMode(cc.GlobalMode) {

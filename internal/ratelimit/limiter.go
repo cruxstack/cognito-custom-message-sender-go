@@ -8,12 +8,15 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/logging"
 )
 
 const (
-	// DecisionSent means the email is within limits and continues to the
+	// DecisionSent means the message is within limits and continues to the
 	// policy and provider. The policy can still deny it.
 	DecisionSent                 = "sent"
 	DecisionThrottledDestination = "throttled_destination"
@@ -35,10 +38,11 @@ const (
 	ttlSlack = time.Hour
 )
 
-// Request describes one custom email sender event.
+// Request describes one custom email or SMS sender event.
 type Request struct {
-	Trigger        string
-	Email          string
+	Trigger string
+	// Destination is the email address or E.164 phone number.
+	Destination    string
 	UserName       string
 	UserAttributes map[string]any
 	// Code is the encrypted code from the event. Lambda retries carry the
@@ -80,7 +84,7 @@ type GlobalState struct {
 	WouldThrottle bool `json:"wouldThrottle"`
 }
 
-// Allowed reports whether the email may be sent. A nil result is allowed.
+// Allowed reports whether the message may be sent. A nil result is allowed.
 func (r *Result) Allowed() bool {
 	if r == nil {
 		return true
@@ -133,15 +137,16 @@ func (l *Limiter) log() *slog.Logger {
 	return slog.Default()
 }
 
-// Check classifies the email, applies exemptions, detects retries, counts the
-// attempt, and decides whether it may be sent. It never returns an error:
-// store failures resolve to fail_open or fail_closed per the config.
+// Check classifies the message, applies exemptions, detects retries, counts
+// the attempt, and decides whether it may be sent. It never returns an
+// error: store failures resolve to fail_open or fail_closed per the config.
 func (l *Limiter) Check(ctx context.Context, req Request) *Result {
 	started := time.Now()
 	now := l.now()
+	ch := l.cfg.Channel()
 
 	class, known := Classify(req.Trigger)
-	lowTrust, trustReason := LowTrust(req.UserAttributes)
+	lowTrust, trustReason := LowTrust(ch, req.UserAttributes)
 	res := &Result{
 		Class:       class,
 		LowTrust:    lowTrust,
@@ -150,7 +155,7 @@ func (l *Limiter) Check(ctx context.Context, req Request) *Result {
 		Global:      GlobalState{Mode: l.cfg.GlobalMode(class), Windows: []WindowState{}},
 	}
 
-	c := check{req: req, addr: NormalizeAddress(req.Email, l.cfg.Normalize), trustReason: trustReason}
+	c := check{req: req, addr: l.normalize(req.Destination), trustReason: trustReason}
 	defer func() {
 		c.latency = time.Since(started)
 		l.report(ctx, res, &c)
@@ -163,7 +168,7 @@ func (l *Limiter) Check(ctx context.Context, req Request) *Result {
 	case slices.Contains(l.cfg.Exempt.Classes, class):
 		res.Decision, res.Exempt, res.Reason = DecisionExempt, true, "exempt_class"
 		return res
-	case slices.Contains(l.cfg.Exempt.Domains, AddressDomain(req.Email)):
+	case ch == ChannelEmail && slices.Contains(l.cfg.Exempt.Domains, AddressDomain(req.Destination)):
 		res.Decision, res.Exempt, res.Reason = DecisionExempt, true, "exempt_domain"
 		return res
 	}
@@ -172,7 +177,7 @@ func (l *Limiter) Check(ctx context.Context, req Request) *Result {
 	defer cancel()
 
 	if req.Code != "" {
-		key := scopeDedupe + "#" + Hash(req.Code)
+		key := string(ch) + "#" + scopeDedupe + "#" + Hash(req.Code)
 		created, err := l.store.PutIfAbsent(cctx, key, now, now.Add(time.Duration(l.cfg.DedupeTTL)))
 		if err != nil {
 			c.err = err
@@ -188,6 +193,14 @@ func (l *Limiter) Check(ctx context.Context, req Request) *Result {
 	dst, usr, glb := l.count(cctx, now, class, c.addr, l.userID(req))
 	c.err = l.decide(res, dst, usr, glb)
 	return res
+}
+
+// normalize returns the destination form used for counting.
+func (l *Limiter) normalize(dst string) string {
+	if l.cfg.Channel() == ChannelSMS {
+		return strings.TrimSpace(dst)
+	}
+	return NormalizeAddress(dst, l.cfg.Normalize)
 }
 
 type check struct {
@@ -215,16 +228,17 @@ func (l *Limiter) userID(req Request) string {
 	return attrString(req.UserAttributes, "sub")
 }
 
-// count increments every counter for the email concurrently and sums the
+// count increments every counter for the message concurrently and sums the
 // shards of each global counter.
 func (l *Limiter) count(ctx context.Context, now time.Time, class, addr, userID string) (dst, usr, glb []*counter) {
 	cc := l.cfg.Classes[class]
+	ch := l.cfg.Channel()
 
 	newCounter := func(scope, id string, lim Limit) *counter {
 		start := bucketStart(now, lim.Window)
 		return &counter{
 			limit:   lim,
-			key:     counterKey(scope, class, id, lim.Window, start),
+			key:     counterKey(ch, scope, class, id, lim.Window, start),
 			expires: start.Add(time.Duration(lim.Window)).Add(ttlSlack),
 		}
 	}
@@ -251,7 +265,7 @@ func (l *Limiter) count(ctx context.Context, now time.Time, class, addr, userID 
 			start := bucketStart(now, lim.Window)
 			for i := range shards {
 				if i != shard {
-					g.peers = append(g.peers, counterKey(scopeGlobal, class, strconv.Itoa(i), lim.Window, start))
+					g.peers = append(g.peers, counterKey(ch, scopeGlobal, class, strconv.Itoa(i), lim.Window, start))
 				}
 			}
 			peers = append(peers, g.peers...)
@@ -358,15 +372,22 @@ func (l *Limiter) applyFailMode(res *Result) {
 
 func (l *Limiter) report(ctx context.Context, res *Result, c *check) {
 	log := l.log()
+	ch := l.cfg.Channel()
+	kind := string(ch) // used in log messages: "email ..." or "sms ..."
 
-	emitMetrics(ctx, log.Handler(), l.cfg.MetricNamespace, res, c)
+	emitMetrics(ctx, log.Handler(), ch, l.cfg.MetricNamespace, res, c)
+
+	masked := logging.MaskEmail(c.addr)
+	if ch == ChannelSMS {
+		masked = logging.MaskPhone(c.addr)
+	}
 
 	attrs := []any{
 		"class", res.Class,
 		"trigger", c.req.Trigger,
 		"decision", res.Decision,
 		"reason", res.Reason,
-		"dst_masked", MaskAddress(c.addr),
+		"dst_masked", masked,
 		"dst_hash", hashOrEmpty(c.addr),
 		"latency_ms", c.latency.Milliseconds(),
 	}
@@ -383,26 +404,26 @@ func (l *Limiter) report(ctx context.Context, res *Result, c *check) {
 		if c.err != nil {
 			attrs = append(attrs, "store_error", c.err)
 		}
-		log.WarnContext(ctx, "email throttled by rate limit", attrs...)
+		log.WarnContext(ctx, kind+" throttled by rate limit", attrs...)
 	case DecisionFailOpen, DecisionFailClosed:
-		log.ErrorContext(ctx, "email rate limit store error", append(attrs, "error", c.err)...)
+		log.ErrorContext(ctx, kind+" rate limit store error", append(attrs, "error", c.err)...)
 	case DecisionDeduped:
-		log.InfoContext(ctx, "email rate limit retry detected, counters not incremented", attrs...)
+		log.InfoContext(ctx, kind+" rate limit retry detected, counters not incremented", attrs...)
 	case DecisionExempt:
 		if res.Reason == "unknown_trigger" {
-			log.WarnContext(ctx, "unknown trigger, skipping email rate limit", attrs...)
+			log.WarnContext(ctx, "unknown trigger, skipping "+kind+" rate limit", attrs...)
 		} else {
-			log.DebugContext(ctx, "email exempt from rate limit", attrs...)
+			log.DebugContext(ctx, kind+" exempt from rate limit", attrs...)
 		}
 	default:
 		if c.addr == "" && len(l.cfg.Classes[res.Class].Destination) > 0 {
-			log.WarnContext(ctx, "email address missing, destination rate limits skipped", attrs...)
+			log.WarnContext(ctx, kind+" destination missing, destination rate limits skipped", attrs...)
 		}
 		if res.Global.WouldThrottle {
-			log.WarnContext(ctx, "global email rate limit exceeded, not enforced in count mode",
+			log.WarnContext(ctx, "global "+kind+" rate limit exceeded, not enforced in count mode",
 				append(attrs, "low_trust", res.LowTrust, "global", res.Global)...)
 		} else {
-			log.DebugContext(ctx, "email within rate limits",
+			log.DebugContext(ctx, kind+" within rate limits",
 				append(attrs, "destination", res.Destination, "user", res.User, "global", res.Global)...)
 		}
 	}
@@ -431,6 +452,6 @@ func bucketStart(now time.Time, w Window) time.Time {
 	return time.Unix(start, 0).UTC()
 }
 
-func counterKey(scope, class, id string, w Window, start time.Time) string {
-	return fmt.Sprintf("%s#%s#%s#%s#%d", scope, class, id, w, start.Unix())
+func counterKey(ch Channel, scope, class, id string, w Window, start time.Time) string {
+	return fmt.Sprintf("%s#%s#%s#%s#%s#%d", ch, scope, class, id, w, start.Unix())
 }
