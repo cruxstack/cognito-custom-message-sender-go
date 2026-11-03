@@ -24,6 +24,7 @@ var localDefaults = map[string]string{
 	"APP_LOG_LEVEL":                   "debug",
 	"APP_KMS_KEY_ID":                  "arn:aws:kms:us-east-1:111122223333:key/local",
 	"APP_EMAIL_RATE_LIMIT_TABLE_NAME": "local",
+	"APP_SMS_RATE_LIMIT_TABLE_NAME":   "local",
 	"APP_SMS_HISTORY_TABLE_NAME":      "local",
 }
 

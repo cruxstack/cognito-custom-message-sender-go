@@ -21,10 +21,10 @@ module.
 - **Email verification** before sending: an offline syntax check, or the
   SendGrid Email Address Validation API (disposable and role address
   detection).
-- **Email rate limiting** per address, per user, and per message class,
-  backed by DynamoDB, to stop OTP and sign-up email floods.
-- **SMS through Amazon SNS,** with per-number history for throttling.
-  Policies and tables from the earlier Node.js SMS sender keep working.
+- **SMS through Amazon SNS.** Policies and history tables from the earlier
+  Node.js SMS sender keep working.
+- **Rate limiting** for email and SMS per destination, per user, and per
+  message class, backed by DynamoDB, to stop code floods and SMS pumping.
 - **Safe by default:** configuration is validated at startup, codes are
   decrypted only for messages that will be sent, and logs mask personal data.
 
@@ -32,7 +32,7 @@ module.
 
 1. Cognito invokes the function with the event and a code encrypted with
    your KMS key.
-2. For email, optional rate limiting and address verification run first.
+2. Optional rate limiting (and, for email, address verification) runs first.
 3. Your policy evaluates the event and returns `allow` (with the template to
    use) or `deny`.
 4. If allowed, the code is decrypted and sent with your template.
@@ -117,7 +117,7 @@ tests and conventions.
 | ---------------------------------------------- | --------------------------------------------------------- |
 | [Configuration](docs/configuration.md)         | Environment variables, failover, IAM, Lambda settings.    |
 | [Policies](docs/policies.md)                   | Policy input and result, writing and testing policies.    |
-| [Rate limiting](docs/rate-limiting.md)         | Email rate limits, the DynamoDB table, metrics.           |
+| [Rate limiting](docs/rate-limiting.md)         | Email and SMS rate limits, the DynamoDB table, metrics.   |
 | [SMS sender](docs/sms.md)                      | SMS history, phone numbers, migrating from Node.js.       |
 | [Architecture](docs/architecture.md)           | Packages, the request flow, and failure handling.         |
 | [Upgrading to v3](docs/upgrading-to-v3.md)     | Breaking changes from v2.                                 |

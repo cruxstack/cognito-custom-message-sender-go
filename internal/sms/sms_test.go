@@ -12,6 +12,7 @@ import (
 
 	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/cognito"
 	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/policy"
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/ratelimit"
 )
 
 type fakePublisher struct {
@@ -360,5 +361,61 @@ result := {"action": "alow", "allow": {"message": "{####}"}}`)
 func TestNew_RequiresDependencies(t *testing.T) {
 	if _, err := New(Config{}); err == nil {
 		t.Error("New() should require dependencies")
+	}
+}
+
+type fakeLimiter struct {
+	result *ratelimit.Result
+	reqs   []ratelimit.Request
+}
+
+func (f *fakeLimiter) Check(_ context.Context, req ratelimit.Request) *ratelimit.Result {
+	f.reqs = append(f.reqs, req)
+	return f.result
+}
+
+func TestHandle_RateLimited(t *testing.T) {
+	h := newHarness(t, recordingPolicy)
+	limiter := &fakeLimiter{result: &ratelimit.Result{Decision: ratelimit.DecisionThrottledDestination}}
+	h.sender.cfg.RateLimiter = limiter
+
+	if err := h.sender.Handle(context.Background(), smsEvent("CustomSMSSender_Authentication", "+1 (206) 555-0100", "c")); err != nil {
+		t.Fatalf("Handle() = %v, want a throttle without an error", err)
+	}
+	if len(h.publisher.sent) != 0 || len(h.history.Records()) != 0 {
+		t.Error("a throttled sms should not be sent or recorded")
+	}
+	if got := limiter.reqs[0]; got.Destination != "+12065550100" || got.Trigger != "CustomSMSSender_Authentication" || got.Code != "c" {
+		t.Errorf("rate limit request = %+v, want the E.164 number", got)
+	}
+}
+
+func TestHandle_RateLimitResultIsPassedToPolicy(t *testing.T) {
+	h := newHarness(t, `package cognito_custom_sender_sms_policy
+import rego.v1
+result := {"action": "allow", "allow": {"message": sprintf("%s %s", [input.rateLimit.class, input.rateLimit.decision])}}`)
+	h.sender.cfg.RateLimiter = &fakeLimiter{result: &ratelimit.Result{Class: "authentication", Decision: ratelimit.DecisionSent}}
+
+	if err := h.sender.Handle(context.Background(), smsEvent("CustomSMSSender_Authentication", "+12065550100", "c")); err != nil {
+		t.Fatal(err)
+	}
+	if body := h.publisher.sent[0].Body; body != "authentication sent" {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestHandle_WithoutHistory(t *testing.T) {
+	h := newHarness(t, `package cognito_custom_sender_sms_policy
+import rego.v1
+default has_history := false
+has_history if input.history
+result := {"action": "allow", "allow": {"message": sprintf("history=%v {####}", [has_history])}}`)
+	h.sender.cfg.History = nil
+
+	if err := h.sender.Handle(context.Background(), smsEvent("CustomSMSSender_SignUp", "+12065550100", "c")); err != nil {
+		t.Fatal(err)
+	}
+	if body := h.publisher.sent[0].Body; body != "history=false 123456" {
+		t.Errorf("body = %q, want input.history unset", body)
 	}
 }

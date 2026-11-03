@@ -177,7 +177,7 @@ func TestSMSPolicies(t *testing.T) {
 	e := readEvents(t, "events/sms.json")[0]
 
 	for attempts, want := range map[int]string{1: "allow", 5: "allow", 6: "block"} {
-		d, err := policy.Eval[sms.Decision](ctx, pol, sms.NewPolicyInput(e, phone, attempts))
+		d, err := policy.Eval[sms.Decision](ctx, pol, sms.NewPolicyInput(e, phone, &sms.PolicyHistory{RecentAttempts: attempts}, nil))
 		if err != nil {
 			t.Fatal(err)
 		}

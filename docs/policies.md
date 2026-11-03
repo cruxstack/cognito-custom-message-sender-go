@@ -87,7 +87,7 @@ tested policies to start from.
 | `CustomEmailSender_Authentication`              | A user signs in with an email OTP or email MFA.          | yes                      |
 | `CustomEmailSender_AccountTakeOverNotification` | Threat protection detects a risky sign-in.               | no                       |
 
-Throttled emails never reach the policy. Rate limit windows are reported in
+Throttled emails (and SMS) never reach the policy. Rate limit windows are reported in
 their largest whole unit (`24h` is reported as `1d`), and counts are empty
 when the email was exempt, deduped, or the store failed.
 
@@ -154,8 +154,12 @@ The SMS policy input has the same `trigger`, `userPoolId`, `region`,
     "isValid": true,
     "isPossible": true
   },
-  // SMS to this number within APP_SMS_THROTTLE_PERIOD, including this one
-  "history": { "recentAttempts": 2 }
+  // set when APP_SMS_HISTORY_TABLE_NAME is configured: SMS to this number
+  // within APP_SMS_THROTTLE_PERIOD, including this one
+  "history": { "recentAttempts": 2 },
+
+  // set when APP_SMS_RATE_LIMIT_ENABLED=true; the same fields as for email
+  "rateLimit": { "class": "authentication", "decision": "sent" /* ... */ }
 }
 ```
 

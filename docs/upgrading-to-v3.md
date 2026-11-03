@@ -39,8 +39,11 @@ Other changes:
   for an invalid boolean, log level, or duration (so `APP_SEND_ENABLED=flase`
   sent email). v3 refuses to start.
 - **`APP_LOG_LEVEL`** accepts `debug`, `info`, `warn`, or `error`.
-- **Table names are always required** when rate limiting or the SMS sender
-  is enabled. v2 fell back to an in-memory store in debug mode.
+- **The rate limit table name is always required** when rate limiting is
+  enabled. v2 fell back to an in-memory store in debug mode.
+- **`APP_SMS_HISTORY_TABLE_NAME` is optional.** Without it, the SMS history
+  is off and the SMS policy input has no `history`. Keep it set if your
+  policy reads `input.history.recentAttempts`.
 - **`APP_EMAIL_VERIFICATION_PROVIDER`** must be `offline` or `sendgrid`. v2
   used `offline` for any unknown value.
 - **`APP_EMAIL_VERIFICATION_ALLOWLIST`** applies to every verification
@@ -83,6 +86,14 @@ Other changes:
   the attribute was missing; v3 skips verification and lets the policy
   decide.
 
+## New in v3
+
+- **SMS rate limiting** with the same limiter as email:
+  `APP_SMS_RATE_LIMIT_ENABLED`, `APP_SMS_RATE_LIMIT_TABLE_NAME`, and
+  `APP_SMS_RATE_LIMIT_CONFIG`. See [rate limiting](rate-limiting.md).
+- **`devtool eval`** evaluates policies against sample events offline.
+- **Prebuilt release binaries** for `linux/arm64` and `linux/amd64`.
+
 ## Behavior changes
 
 - **Failed deliveries return an error.** With failover enabled, v2 returned
@@ -98,6 +109,9 @@ Other changes:
   (`&lt;`), so users couldn't sign in with the password they received.
 - **SES sends with the SESv2 `SendEmail` API.** The role needs
   `ses:SendEmail`; `ses:SendTemplatedEmail` is no longer used.
+- **Rate limit counters are keyed by channel** (`email#...`, `sms#...`), so
+  email and SMS can share a table. Counters and retry markers written by
+  v2.6 aren't read by v3, so limits start from zero after the upgrade.
 - **Logs mask email addresses** (`u***@example.com`) and carry `request_id`,
   `trigger`, `user_pool_id`, and `client_id`.
 

@@ -102,7 +102,7 @@ func TestLowTrust(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			low, reason := LowTrust(tc.attrs)
+			low, reason := LowTrust(ChannelEmail, tc.attrs)
 			if low != tc.wantLow || reason != tc.wantReason {
 				t.Errorf("LowTrust() = %v, %q; want %v, %q", low, reason, tc.wantLow, tc.wantReason)
 			}

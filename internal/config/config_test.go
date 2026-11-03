@@ -45,7 +45,7 @@ func TestLoad_Defaults(t *testing.T) {
 		!e.VerificationEnabled || e.VerificationProvider != "offline" || e.RateLimitEnabled || e.RateLimit != nil {
 		t.Errorf("email = %+v", e)
 	}
-	if cfg.SMS.Enabled || cfg.SMS.HistoryTTL != 30*24*time.Hour || cfg.SMS.ThrottlePeriod != 15*time.Minute {
+	if cfg.SMS.Enabled || cfg.SMS.RateLimitEnabled || cfg.SMS.HistoryTTL != 30*24*time.Hour || cfg.SMS.ThrottlePeriod != 15*time.Minute {
 		t.Errorf("sms = %+v", cfg.SMS)
 	}
 	if cfg.SendGrid.APIHost != "https://api.sendgrid.com" {
@@ -69,6 +69,9 @@ func TestLoad_Full(t *testing.T) {
 		"APP_SMS_HISTORY_TABLE_NAME":              "history",
 		"APP_SMS_HISTORY_TTL":                     "48h",
 		"APP_SMS_THROTTLE_PERIOD":                 "5m",
+		"APP_SMS_RATE_LIMIT_ENABLED":              "true",
+		"APP_SMS_RATE_LIMIT_TABLE_NAME":           "rate-limits",
+		"APP_SMS_RATE_LIMIT_CONFIG":               `{"failMode":"closed"}`,
 		"APP_SENDGRID_API_HOST":                   "https://api.eu.sendgrid.com",
 		"APP_SENDGRID_EMAIL_SEND_API_KEY":         "SG.send",
 		"APP_SENDGRID_EMAIL_VERIFICATION_API_KEY": "SG.verify",
@@ -91,6 +94,10 @@ func TestLoad_Full(t *testing.T) {
 	if s := cfg.SMS; !s.Enabled || s.PolicyPath != "sms.rego" || s.HistoryTableName != "history" || s.HistoryTTL != 48*time.Hour || s.ThrottlePeriod != 5*time.Minute {
 		t.Errorf("sms = %+v", s)
 	}
+	if s := cfg.SMS; !s.RateLimitEnabled || s.RateLimitTableName != "rate-limits" || s.RateLimit == nil ||
+		s.RateLimit.Channel() != "sms" || s.RateLimit.FailMode != "closed" {
+		t.Errorf("sms rate limit = %v %q %+v", s.RateLimitEnabled, s.RateLimitTableName, s.RateLimit)
+	}
 	if g := cfg.SendGrid; g.APIHost != "https://api.eu.sendgrid.com" || g.SendAPIKey != "SG.send" || g.VerificationAPIKey != "SG.verify" {
 		t.Errorf("sendgrid = %+v", g)
 	}
@@ -102,7 +109,7 @@ func TestLoad_SMSOnly(t *testing.T) {
 		"APP_EMAIL_SENDER_ENABLED":   "false",
 		"APP_SMS_SENDER_ENABLED":     "true",
 		"APP_SMS_SENDER_POLICY_PATH": "sms.rego",
-		"APP_SMS_HISTORY_TABLE_NAME": "history",
+		// the history table is optional
 		// email settings are not validated when the email sender is off
 		"APP_EMAIL_PROVIDERS":          "mailgun",
 		"APP_EMAIL_RATE_LIMIT_ENABLED": "true",
@@ -137,7 +144,8 @@ func TestLoad_Errors(t *testing.T) {
 		{"rate limit without table", with(map[string]string{"APP_EMAIL_RATE_LIMIT_ENABLED": "true"}), "APP_EMAIL_RATE_LIMIT_TABLE_NAME is required"},
 		{"invalid rate limit config", with(map[string]string{"APP_EMAIL_RATE_LIMIT_ENABLED": "true", "APP_EMAIL_RATE_LIMIT_TABLE_NAME": "t", "APP_EMAIL_RATE_LIMIT_CONFIG": `{"failMode":"maybe"}`}), "APP_EMAIL_RATE_LIMIT_CONFIG"},
 		{"sms without policy", with(map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_HISTORY_TABLE_NAME": "h"}), "APP_SMS_SENDER_POLICY_PATH is required"},
-		{"sms without table", with(map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_SENDER_POLICY_PATH": "p"}), "APP_SMS_HISTORY_TABLE_NAME is required"},
+		{"sms rate limit without table", with(map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_SENDER_POLICY_PATH": "p", "APP_SMS_RATE_LIMIT_ENABLED": "true"}), "APP_SMS_RATE_LIMIT_TABLE_NAME is required"},
+		{"invalid sms rate limit config", with(map[string]string{"APP_SMS_SENDER_ENABLED": "true", "APP_SMS_SENDER_POLICY_PATH": "p", "APP_SMS_RATE_LIMIT_ENABLED": "true", "APP_SMS_RATE_LIMIT_TABLE_NAME": "t", "APP_SMS_RATE_LIMIT_CONFIG": `{"classes": {"notification": {}}}`}), "APP_SMS_RATE_LIMIT_CONFIG"},
 		{"removed variable", with(map[string]string{"APP_EMAIL_PROVIDER": "sendgrid"}), "APP_EMAIL_PROVIDER was removed in v3: use APP_EMAIL_PROVIDERS"},
 		{"removed debug mode", with(map[string]string{"APP_DEBUG_MODE": "false"}), "APP_DEBUG_MODE was removed"},
 	}

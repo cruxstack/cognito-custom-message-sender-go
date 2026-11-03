@@ -55,11 +55,17 @@ type Email struct {
 
 // SMS configures the custom SMS sender.
 type SMS struct {
-	Enabled          bool
-	PolicyPath       string
+	Enabled    bool
+	PolicyPath string
+	// HistoryTableName enables the SMS history (input.history) when set.
 	HistoryTableName string
 	HistoryTTL       time.Duration
 	ThrottlePeriod   time.Duration
+
+	RateLimitEnabled   bool
+	RateLimitTableName string
+	// RateLimit is nil unless RateLimitEnabled is true.
+	RateLimit *ratelimit.Config
 }
 
 // SendGrid holds the SendGrid API settings.
@@ -116,11 +122,13 @@ func Load(lookup func(string) (string, bool)) (*Config, error) {
 			RateLimitTableName:    r.str("APP_EMAIL_RATE_LIMIT_TABLE_NAME"),
 		},
 		SMS: SMS{
-			Enabled:          r.boolean("APP_SMS_SENDER_ENABLED", false),
-			PolicyPath:       r.str("APP_SMS_SENDER_POLICY_PATH"),
-			HistoryTableName: r.str("APP_SMS_HISTORY_TABLE_NAME"),
-			HistoryTTL:       r.duration("APP_SMS_HISTORY_TTL", 30*24*time.Hour),
-			ThrottlePeriod:   r.duration("APP_SMS_THROTTLE_PERIOD", 15*time.Minute),
+			Enabled:            r.boolean("APP_SMS_SENDER_ENABLED", false),
+			PolicyPath:         r.str("APP_SMS_SENDER_POLICY_PATH"),
+			HistoryTableName:   r.str("APP_SMS_HISTORY_TABLE_NAME"),
+			HistoryTTL:         r.duration("APP_SMS_HISTORY_TTL", 30*24*time.Hour),
+			ThrottlePeriod:     r.duration("APP_SMS_THROTTLE_PERIOD", 15*time.Minute),
+			RateLimitEnabled:   r.boolean("APP_SMS_RATE_LIMIT_ENABLED", false),
+			RateLimitTableName: r.str("APP_SMS_RATE_LIMIT_TABLE_NAME"),
 		},
 		SendGrid: SendGrid{
 			APIHost:            r.strOr("APP_SENDGRID_API_HOST", sendgrid.DefaultBaseURL),
@@ -129,14 +137,13 @@ func Load(lookup func(string) (string, bool)) (*Config, error) {
 		},
 	}
 
-	// the rate limit config is only read when the feature is enabled, so an
+	// rate limit configs are only read when the feature is enabled, so an
 	// invalid value can't affect deployments that leave it off
 	if cfg.Email.Enabled && cfg.Email.RateLimitEnabled {
-		rl, err := ratelimit.ParseConfig(r.str("APP_EMAIL_RATE_LIMIT_CONFIG"))
-		if err != nil {
-			r.fail(fmt.Errorf("APP_EMAIL_RATE_LIMIT_CONFIG: %w", err))
-		}
-		cfg.Email.RateLimit = rl
+		cfg.Email.RateLimit = r.rateLimit("APP_EMAIL_RATE_LIMIT_CONFIG", ratelimit.ChannelEmail)
+	}
+	if cfg.SMS.Enabled && cfg.SMS.RateLimitEnabled {
+		cfg.SMS.RateLimit = r.rateLimit("APP_SMS_RATE_LIMIT_CONFIG", ratelimit.ChannelSMS)
 	}
 
 	r.errs = append(r.errs, cfg.validate()...)
@@ -186,7 +193,9 @@ func (c *Config) validate() []error {
 
 	if s := c.SMS; s.Enabled {
 		req(s.PolicyPath != "", "APP_SMS_SENDER_POLICY_PATH is required when the sms sender is enabled")
-		req(s.HistoryTableName != "", "APP_SMS_HISTORY_TABLE_NAME is required when the sms sender is enabled")
+		if s.RateLimitEnabled {
+			req(s.RateLimitTableName != "", "APP_SMS_RATE_LIMIT_TABLE_NAME is required when APP_SMS_RATE_LIMIT_ENABLED is true")
+		}
 	}
 
 	return errs
@@ -240,6 +249,14 @@ func (r *reader) duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func (r *reader) rateLimit(key string, ch ratelimit.Channel) *ratelimit.Config {
+	rl, err := ratelimit.ParseConfig(ch, r.str(key))
+	if err != nil {
+		r.fail(fmt.Errorf("%s: %w", key, err))
+	}
+	return rl
 }
 
 func (r *reader) level(key string, def slog.Level) slog.Level {

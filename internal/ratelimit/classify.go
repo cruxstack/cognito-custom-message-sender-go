@@ -15,18 +15,18 @@ const (
 	ClassNotification   = "notification"
 
 	// ClassUnknown is reported for trigger sources this package does not
-	// recognize. Those emails are allowed and not counted.
+	// recognize. Those messages are allowed and not counted.
 	ClassUnknown = "unknown"
 )
 
-// Classes lists the message classes that can be configured.
-var Classes = []string{
-	ClassAuthentication,
-	ClassSignUp,
-	ClassForgotPassword,
-	ClassAttribute,
-	ClassAdmin,
-	ClassNotification,
+// ClassesFor lists the message classes that can be configured for a
+// channel. Cognito sends account takeover notifications only by email.
+func ClassesFor(ch Channel) []string {
+	classes := []string{ClassAuthentication, ClassSignUp, ClassForgotPassword, ClassAttribute, ClassAdmin}
+	if ch == ChannelEmail {
+		classes = append(classes, ClassNotification)
+	}
+	return classes
 }
 
 var triggerClasses = map[string]string{
@@ -38,10 +38,19 @@ var triggerClasses = map[string]string{
 	"CustomEmailSender_VerifyUserAttribute":         ClassAttribute,
 	"CustomEmailSender_AdminCreateUser":             ClassAdmin,
 	"CustomEmailSender_AccountTakeOverNotification": ClassNotification,
+
+	"CustomSMSSender_Authentication":      ClassAuthentication,
+	"CustomSMSSender_SignUp":              ClassSignUp,
+	"CustomSMSSender_ResendCode":          ClassSignUp,
+	"CustomSMSSender_ForgotPassword":      ClassForgotPassword,
+	"CustomSMSSender_UpdateUserAttribute": ClassAttribute,
+	"CustomSMSSender_VerifyUserAttribute": ClassAttribute,
+	"CustomSMSSender_AdminCreateUser":     ClassAdmin,
 }
 
-// Classify maps a cognito custom email sender trigger source to its message
-// class. It returns ClassUnknown and false for unrecognized triggers.
+// Classify maps a cognito custom email or SMS sender trigger source to its
+// message class. It returns ClassUnknown and false for unrecognized
+// triggers.
 func Classify(trigger string) (string, bool) {
 	if c, ok := triggerClasses[trigger]; ok {
 		return c, true
@@ -99,17 +108,23 @@ func Hash(s string) string {
 
 // LowTrust reports whether a recipient should be throttled first when a
 // class nears its global limit, along with the reason. A recipient is low
-// trust when the user is unconfirmed or the email address is not verified.
-// Cognito does not document which attributes each trigger includes, so a
-// missing email_verified attribute counts as unverified.
-func LowTrust(attrs map[string]any) (bool, string) {
+// trust when the user is unconfirmed or the destination is not verified
+// (email_verified for email, phone_number_verified for SMS). Cognito does
+// not document which attributes each trigger includes, so a missing
+// verification attribute counts as unverified.
+func LowTrust(ch Channel, attrs map[string]any) (bool, string) {
 	if strings.EqualFold(attrString(attrs, "cognito:user_status"), "UNCONFIRMED") {
 		return true, "user_unconfirmed"
 	}
 
-	v, ok := attrs["email_verified"]
+	attr, unverified := "email_verified", "email_unverified"
+	if ch == ChannelSMS {
+		attr, unverified = "phone_number_verified", "phone_number_unverified"
+	}
+
+	v, ok := attrs[attr]
 	if !ok || v == nil {
-		return true, "email_verified_missing"
+		return true, attr + "_missing"
 	}
 	switch t := v.(type) {
 	case bool:
@@ -121,7 +136,7 @@ func LowTrust(attrs map[string]any) (bool, string) {
 			return false, ""
 		}
 	}
-	return true, "email_unverified"
+	return true, unverified
 }
 
 func attrString(attrs map[string]any, key string) string {

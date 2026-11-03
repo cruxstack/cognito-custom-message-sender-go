@@ -53,12 +53,13 @@ func WithSNSClient(c sms.SNSAPI) Option {
 	return func(o *deps) { o.sns = c }
 }
 
-// WithRateLimitStore replaces the DynamoDB rate limit store.
+// WithRateLimitStore replaces the DynamoDB rate limit store for email and SMS.
 func WithRateLimitStore(s ratelimit.Store) Option {
 	return func(o *deps) { o.rateLimitStore = s }
 }
 
-// WithSMSHistory replaces the DynamoDB SMS history store.
+// WithSMSHistory replaces the DynamoDB SMS history store. The history is
+// still only used when APP_SMS_HISTORY_TABLE_NAME is set.
 func WithSMSHistory(h sms.HistoryStore) Option {
 	return func(o *deps) { o.smsHistory = h }
 }
@@ -156,11 +157,7 @@ func newEmailSender(ctx context.Context, cfg *config.Config, awsCfg aws.Config, 
 
 	var limiter email.RateLimiter
 	if cfg.Email.RateLimitEnabled {
-		store := d.rateLimitStore
-		if store == nil {
-			store = ratelimit.NewDynamoDBStore(dynamo(), cfg.Email.RateLimitTableName)
-		}
-		limiter = ratelimit.New(cfg.Email.RateLimit, store)
+		limiter = newLimiter(cfg.Email.RateLimit, cfg.Email.RateLimitTableName, d, dynamo)
 	}
 
 	return email.New(email.Config{
@@ -186,17 +183,37 @@ func newSMSSender(ctx context.Context, cfg *config.Config, awsCfg aws.Config, d 
 		pub = &sms.SNSPublisher{Client: d.sns}
 	}
 
-	history := d.smsHistory
-	if history == nil {
-		history = sms.NewDynamoDBHistory(dynamo(), cfg.SMS.HistoryTableName)
+	var history sms.HistoryStore
+	if cfg.SMS.HistoryTableName != "" {
+		history = d.smsHistory
+		if history == nil {
+			history = sms.NewDynamoDBHistory(dynamo(), cfg.SMS.HistoryTableName)
+		}
+	}
+
+	var limiter sms.RateLimiter
+	if cfg.SMS.RateLimitEnabled {
+		limiter = newLimiter(cfg.SMS.RateLimit, cfg.SMS.RateLimitTableName, d, dynamo)
 	}
 
 	return sms.New(sms.Config{
 		Policy:         pol,
 		Decrypter:      d.decrypter,
 		Publisher:      pub,
+		RateLimiter:    limiter,
 		History:        history,
 		HistoryTTL:     cfg.SMS.HistoryTTL,
 		ThrottlePeriod: cfg.SMS.ThrottlePeriod,
 	})
+}
+
+// newLimiter returns a rate limiter backed by the table, or by the store
+// passed with WithRateLimitStore. Email and SMS counters are keyed by
+// channel, so they can share a table or a store.
+func newLimiter(cfg *ratelimit.Config, table string, d *deps, dynamo func() *dynamodb.Client) *ratelimit.Limiter {
+	store := d.rateLimitStore
+	if store == nil {
+		store = ratelimit.NewDynamoDBStore(dynamo(), table)
+	}
+	return ratelimit.New(cfg, store)
 }

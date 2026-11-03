@@ -37,7 +37,10 @@ Booleans are `true` or `false`. Durations are Go durations such as `30s`,
 | ---------------------------- | ----------------------------------------------------------------- | --------------------- |
 | `APP_SMS_SENDER_ENABLED`     | Handle `CustomSMSSender_*` events. See [SMS sender](sms.md).      | `false`               |
 | `APP_SMS_SENDER_POLICY_PATH` | Path to the SMS policy.                                           | required when enabled |
-| `APP_SMS_HISTORY_TABLE_NAME` | DynamoDB table for SMS history.                                   | required when enabled |
+| `APP_SMS_RATE_LIMIT_ENABLED` | Enable [rate limiting](rate-limiting.md) for SMS.                 | `false`               |
+| `APP_SMS_RATE_LIMIT_TABLE_NAME` | DynamoDB table for rate limit counters; can be the email table. | required when enabled |
+| `APP_SMS_RATE_LIMIT_CONFIG`  | JSON that overrides the default SMS limits.                       | defaults              |
+| `APP_SMS_HISTORY_TABLE_NAME` | DynamoDB table for the [SMS history](sms.md#history-table) (`input.history`). | unset (history off) |
 | `APP_SMS_HISTORY_TTL`        | How long history records are kept.                                | `720h`                |
 | `APP_SMS_THROTTLE_PERIOD`    | The window `input.history.recentAttempts` counts over.            | `15m`                 |
 
@@ -84,15 +87,17 @@ The execution role needs only the statements for the features you enable.
   // email with ses (GetAccount only when ses is followed by another provider)
   { "Effect": "Allow", "Action": ["ses:SendEmail", "ses:GetAccount"], "Resource": "*" },
 
-  // email rate limiting
+  // email or sms rate limiting
   {
     "Effect": "Allow",
     "Action": ["dynamodb:UpdateItem", "dynamodb:PutItem", "dynamodb:BatchGetItem"],
-    "Resource": "arn:aws:dynamodb:us-east-1:111122223333:table/EXAMPLE-email-rate-limit"
+    "Resource": "arn:aws:dynamodb:us-east-1:111122223333:table/EXAMPLE-rate-limit"
   },
 
   // sms
   { "Effect": "Allow", "Action": "sns:Publish", "Resource": "*" },
+
+  // sms history
   {
     "Effect": "Allow",
     "Action": ["dynamodb:PutItem", "dynamodb:Query"],

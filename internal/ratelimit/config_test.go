@@ -10,12 +10,12 @@ import (
 
 func TestParseConfig_Empty(t *testing.T) {
 	for _, raw := range []string{"", "  ", "{}"} {
-		cfg, err := ParseConfig(raw)
+		cfg, err := ParseConfig(ChannelEmail, raw)
 		if err != nil {
-			t.Fatalf("ParseConfig(%q) error = %v", raw, err)
+			t.Fatalf("ParseConfig(ChannelEmail, %q) error = %v", raw, err)
 		}
-		if !reflect.DeepEqual(cfg, DefaultConfig()) {
-			t.Errorf("ParseConfig(%q) = %+v, want defaults", raw, cfg)
+		if !reflect.DeepEqual(cfg, DefaultConfig(ChannelEmail)) {
+			t.Errorf("ParseConfig(ChannelEmail, %q) = %+v, want defaults", raw, cfg)
 		}
 	}
 }
@@ -33,9 +33,9 @@ func TestParseConfig_Overrides(t *testing.T) {
 		}
 	}`
 
-	cfg, err := ParseConfig(raw)
+	cfg, err := ParseConfig(ChannelEmail, raw)
 	if err != nil {
-		t.Fatalf("ParseConfig() error = %v", err)
+		t.Fatalf("ParseConfig(ChannelEmail, ) error = %v", err)
 	}
 
 	if cfg.FailMode != FailClosed || cfg.MetricNamespace != "Example/Email" || cfg.Timeout != Duration(250*time.Millisecond) {
@@ -61,7 +61,7 @@ func TestParseConfig_Overrides(t *testing.T) {
 	if cfg.GlobalMode(ClassSignUp) != ModeCount || cfg.GlobalMode(ClassAuthentication) != ModeEnforce {
 		t.Errorf("GlobalMode() signup = %q, authentication = %q", cfg.GlobalMode(ClassSignUp), cfg.GlobalMode(ClassAuthentication))
 	}
-	if !reflect.DeepEqual(cfg.Classes[ClassAuthentication], DefaultConfig().Classes[ClassAuthentication]) {
+	if !reflect.DeepEqual(cfg.Classes[ClassAuthentication], DefaultConfig(ChannelEmail).Classes[ClassAuthentication]) {
 		t.Error("classes not in the document should keep their defaults")
 	}
 }
@@ -90,7 +90,7 @@ func TestParseConfig_Errors(t *testing.T) {
 		{"shards too many", `{"global": {"shards": 101}}`, "global.shards"},
 		{"degrade zero", `{"global": {"degradeFraction": 0}}`, "degradeFraction"},
 		{"degrade over one", `{"global": {"degradeFraction": 1.5}}`, "degradeFraction"},
-		{"unknown class", `{"classes": {"marketing": {}}}`, "unknown class"},
+		{"unknown class", `{"classes": {"marketing": {}}}`, "unknown email class"},
 		{"class global mode", `{"classes": {"signup": {"globalMode": "block"}}}`, "globalMode"},
 		{"window syntax", `{"classes": {"signup": {"destination": [{"window": "1w", "max": 1}]}}}`, "invalid window"},
 		{"window zero", `{"classes": {"signup": {"destination": [{"window": "0m", "max": 1}]}}}`, "invalid window"},
@@ -103,9 +103,9 @@ func TestParseConfig_Errors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseConfig(tc.raw)
+			_, err := ParseConfig(ChannelEmail, tc.raw)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("ParseConfig() error = %v, want error containing %q", err, tc.wantErr)
+				t.Errorf("ParseConfig(ChannelEmail, ) error = %v, want error containing %q", err, tc.wantErr)
 			}
 		})
 	}
@@ -154,15 +154,15 @@ func TestParseWindow(t *testing.T) {
 }
 
 func TestConfig_JSONRoundTrip(t *testing.T) {
-	bs, err := json.Marshal(DefaultConfig())
+	bs, err := json.Marshal(DefaultConfig(ChannelEmail))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := ParseConfig(string(bs))
+	cfg, err := ParseConfig(ChannelEmail, string(bs))
 	if err != nil {
-		t.Fatalf("ParseConfig(marshaled defaults) error = %v\n%s", err, bs)
+		t.Fatalf("ParseConfig(ChannelEmail, marshaled defaults) error = %v\n%s", err, bs)
 	}
-	if !reflect.DeepEqual(cfg, DefaultConfig()) {
+	if !reflect.DeepEqual(cfg, DefaultConfig(ChannelEmail)) {
 		t.Errorf("round trip changed the config:\n%s", bs)
 	}
 }

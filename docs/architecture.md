@@ -9,8 +9,8 @@ deliver the code, then sends it.
 Cognito ─▶ handler ─┬─▶ email: rate limit ─▶ verify ─▶ policy ─▶ decrypt ─▶ mailer ─▶ SES / SendGrid
           (routes   │          (DynamoDB)    (SendGrid)  (Rego)    (KMS)     (failover)
           by trigger)
-                    └─▶ sms:   history ─────────────────▶ policy ─▶ decrypt ─▶ publisher ─▶ SNS
-                               (DynamoDB)                (Rego)    (KMS)
+                    └─▶ sms:   rate limit ─▶ history ─▶ policy ─▶ decrypt ─▶ publisher ─▶ SNS
+                               (DynamoDB)    (DynamoDB)  (Rego)    (KMS)
 ```
 
 The order is deliberate: cheap checks run first, and the code is decrypted
@@ -32,14 +32,14 @@ KMS call.
 | `internal/policy`    | Compiles and evaluates Rego policies; validates actions.                                           |
 | `internal/mailer`    | Email delivery: the SES and SendGrid providers, the failover chain, and the dry-run mailer.        |
 | `internal/verify`    | Email verification: offline, SendGrid, and the allowlist.                                          |
-| `internal/ratelimit` | Email rate limiting with fixed-window counters in DynamoDB.                                        |
+| `internal/ratelimit` | Email and SMS rate limiting with fixed-window counters in DynamoDB.                                |
 | `internal/decrypt`   | Decrypts codes with the AWS Encryption SDK and KMS.                                                |
 | `internal/sendgrid`  | A minimal client for the SendGrid Mail Send and Email Address Validation APIs.                     |
 | `internal/logging`   | The JSON log handler with per-event context, and masking of emails and phone numbers.              |
 
 Dependencies point one way: `app` knows every package; the senders depend
 on small interfaces (`mailer.Mailer`, `verify.Verifier`, `decrypt.Decrypter`,
-`email.RateLimiter`, `sms.Publisher`, `sms.HistoryStore`) rather than on
+`email.RateLimiter`, `sms.RateLimiter`, `sms.Publisher`, `sms.HistoryStore`) rather than on
 configuration or AWS clients, which keeps them testable with fakes.
 
 ## Failure handling
@@ -51,7 +51,7 @@ an error only when a retry could help or the event should be kept:
 
 | Situation                                                | Result                         |
 | -------------------------------------------------------- | ------------------------------ |
-| Email throttled by a rate limit                          | logged, success                |
+| Email or SMS throttled by a rate limit                   | logged, success                |
 | Message denied by the policy                             | logged, success                |
 | SMS to an invalid phone number                           | logged, success                |
 | Event for a disabled sender or an unknown trigger        | logged, success                |

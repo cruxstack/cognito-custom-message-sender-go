@@ -99,7 +99,7 @@ func (h *harness) check(trigger, email string, attrs map[string]any) *Result {
 	}
 	return h.limiter.Check(context.Background(), Request{
 		Trigger:        trigger,
-		Email:          email,
+		Destination:    email,
 		UserName:       "user-1",
 		UserAttributes: attrs,
 		Code:           fmt.Sprintf("ciphertext-%d", h.codes.Add(1)),
@@ -107,7 +107,7 @@ func (h *harness) check(trigger, email string, attrs map[string]any) *Result {
 }
 
 func configWith(mutate func(c *Config)) *Config {
-	c := DefaultConfig()
+	c := DefaultConfig(ChannelEmail)
 	mutate(c)
 	return c
 }
@@ -153,14 +153,14 @@ func TestBucketStart(t *testing.T) {
 
 func TestCounterKey(t *testing.T) {
 	w, _ := ParseWindow("60m")
-	got := counterKey(scopeDestination, ClassSignUp, "abc", w, testStart)
-	if want := fmt.Sprintf("dst#signup#abc#1h#%d", testStart.Unix()); got != want {
+	got := counterKey(ChannelEmail, scopeDestination, ClassSignUp, "abc", w, testStart)
+	if want := fmt.Sprintf("email#dst#signup#abc#1h#%d", testStart.Unix()); got != want {
 		t.Errorf("counterKey() = %q, want %q", got, want)
 	}
 }
 
 func TestLimiter_DestinationLimit(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelDebug)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelDebug)
 
 	// signup allows 3 per hour; aliases of one mailbox share the counter
 	addrs := []string{"user@example.com", "User+promo@Example.com", " user+x@example.com", "user@example.com"}
@@ -206,7 +206,7 @@ func TestLimiter_DestinationLimit(t *testing.T) {
 }
 
 func TestLimiter_ResendCodeSharesSignupBudget(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelError)
 
 	triggers := []string{"CustomEmailSender_SignUp", "CustomEmailSender_ResendCode", "CustomEmailSender_ResendCode", "CustomEmailSender_ResendCode"}
 	var last *Result
@@ -219,7 +219,7 @@ func TestLimiter_ResendCodeSharesSignupBudget(t *testing.T) {
 }
 
 func TestLimiter_WindowRollover(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelError)
 
 	for range 3 {
 		h.check("CustomEmailSender_SignUp", "user@example.com", nil)
@@ -244,7 +244,7 @@ func TestLimiter_NormalizationFlags(t *testing.T) {
 	aliases := []string{"first.last@gmail.com", "firstlast+tag@googlemail.com"}
 
 	t.Run("enabled", func(t *testing.T) {
-		h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
+		h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelError)
 		h.check("CustomEmailSender_ForgotPassword", aliases[0], nil)
 		r := h.check("CustomEmailSender_ForgotPassword", aliases[1], nil)
 		if r.Destination[0].Count != 2 {
@@ -264,7 +264,7 @@ func TestLimiter_NormalizationFlags(t *testing.T) {
 }
 
 func TestLimiter_StoresHashesOnly(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelError)
 	h.check("CustomEmailSender_Authentication", "first.last@example.com", map[string]any{"sub": "sub-plain", "email_verified": "true"})
 
 	keys := h.store.Keys()
@@ -348,7 +348,7 @@ func TestLimiter_GlobalCountMode(t *testing.T) {
 
 	var exceeded int
 	for _, line := range h.logs.Lines() {
-		if line[MetricGlobalExceeded] != nil {
+		if line[ChannelEmail.MetricName(MetricGlobalExceeded)] != nil {
 			exceeded++
 		}
 	}
@@ -434,10 +434,10 @@ func TestLimiter_GlobalDegrade(t *testing.T) {
 }
 
 func TestLimiter_DedupeRetry(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelInfo)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelInfo)
 	req := Request{
 		Trigger:        "CustomEmailSender_SignUp",
-		Email:          "user@example.com",
+		Destination:    "user@example.com",
 		UserAttributes: map[string]any{"email_verified": "false"},
 		Code:           "same-ciphertext",
 	}
@@ -461,15 +461,15 @@ func TestLimiter_DedupeRetry(t *testing.T) {
 	}
 
 	// the marker expires after dedupeTtl
-	h.clock.Advance(time.Duration(DefaultConfig().DedupeTTL) + time.Second)
+	h.clock.Advance(time.Duration(DefaultConfig(ChannelEmail).DedupeTTL) + time.Second)
 	if r := h.limiter.Check(context.Background(), req); r.Decision == DecisionDeduped {
 		t.Error("expired retry marker should not dedupe")
 	}
 }
 
 func TestLimiter_EmptyCodeIsCountedWithoutDedupe(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelError)
-	req := Request{Trigger: "CustomEmailSender_AccountTakeOverNotification", Email: "user@example.com"}
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelError)
+	req := Request{Trigger: "CustomEmailSender_AccountTakeOverNotification", Destination: "user@example.com"}
 
 	var last *Result
 	for range 4 {
@@ -479,7 +479,7 @@ func TestLimiter_EmptyCodeIsCountedWithoutDedupe(t *testing.T) {
 		t.Errorf("decision = %q, class = %q; want notification throttled", last.Decision, last.Class)
 	}
 	for _, k := range h.store.Keys() {
-		if strings.HasPrefix(k, scopeDedupe) {
+		if strings.HasPrefix(k, "email#"+scopeDedupe) {
 			t.Errorf("unexpected retry marker %q for an event without a code", k)
 		}
 	}
@@ -529,7 +529,7 @@ func TestLimiter_Exemptions(t *testing.T) {
 }
 
 func TestLimiter_MissingEmail(t *testing.T) {
-	h := newHarness(t, DefaultConfig(), nil, slog.LevelWarn)
+	h := newHarness(t, DefaultConfig(ChannelEmail), nil, slog.LevelWarn)
 	r := h.check("CustomEmailSender_SignUp", "", nil)
 	if r.Decision != DecisionSent || len(r.Destination) != 0 {
 		t.Errorf("result = %+v, want sent without destination counters", r)
@@ -614,7 +614,7 @@ func TestLimiter_StoreFailure(t *testing.T) {
 }
 
 func TestLimiter_KnownThrottleWinsOverStoreError(t *testing.T) {
-	store := &faultyStore{MemoryStore: NewMemoryStore(), failIncrement: func(k string) bool { return strings.HasPrefix(k, scopeGlobal) }}
+	store := &faultyStore{MemoryStore: NewMemoryStore(), failIncrement: func(k string) bool { return strings.HasPrefix(k, "email#"+scopeGlobal) }}
 	h := newHarness(t, globalConfig(ModeEnforce, 100, 1), store, slog.LevelError)
 
 	ac := h.limiter.cfg.Classes[ClassAuthentication]
@@ -675,7 +675,7 @@ func TestLimiter_ConcurrentChecks(t *testing.T) {
 	// within one window's limit but over another's; the burst never sends
 	// more than the smallest limit
 	t.Run("multiple windows never exceed a limit", func(t *testing.T) {
-		sent, h := burst(t, DefaultConfig())
+		sent, h := burst(t, DefaultConfig(ChannelEmail))
 		if sent > 3 {
 			t.Errorf("sent %d emails, want at most the limit of 3", sent)
 		}
@@ -706,7 +706,7 @@ func TestLimiter_Metrics(t *testing.T) {
 	}
 
 	last := records[3]
-	if last["class"] != ClassSignUp || last["decision"] != DecisionThrottledDestination || last[MetricDecision] != float64(1) {
+	if last["class"] != ClassSignUp || last["decision"] != DecisionThrottledDestination || last[ChannelEmail.MetricName(MetricDecision)] != float64(1) {
 		t.Errorf("record = %v", last)
 	}
 
@@ -721,7 +721,7 @@ func TestLimiter_Metrics(t *testing.T) {
 	if got := fmt.Sprint(directive["Dimensions"]); got != "[[class decision]]" {
 		t.Errorf("Dimensions = %s, want [[class decision]]", got)
 	}
-	if got := fmt.Sprint(directive["Metrics"]); !strings.Contains(got, MetricDecision) || !strings.Contains(got, "Count") {
+	if got := fmt.Sprint(directive["Metrics"]); !strings.Contains(got, ChannelEmail.MetricName(MetricDecision)) || !strings.Contains(got, "Count") {
 		t.Errorf("Metrics = %s", got)
 	}
 

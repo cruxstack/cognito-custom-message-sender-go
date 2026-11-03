@@ -1,9 +1,11 @@
-// Package sms handles custom SMS sender events and sends policy-driven SMS
-// through Amazon SNS.
+// Package sms handles custom SMS sender events: it rate limits, records the
+// attempt, asks the policy whether and how to send, decrypts the code, and
+// publishes the SMS through Amazon SNS.
 //
-// It is a port of the earlier Node.js sender from the Terraform module: the
-// policy input and output, the history table layout, and the {####} code
-// placeholder are unchanged, so existing policies and tables keep working.
+// It started as a port of the earlier Node.js sender from the Terraform
+// module: the policy input and output, the history table layout, and the
+// {####} code placeholder are unchanged, so existing policies and tables keep
+// working.
 package sms
 
 import (
@@ -19,6 +21,7 @@ import (
 	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/decrypt"
 	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/logging"
 	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/policy"
+	"github.com/cruxstack/cognito-custom-message-sender-go/v3/internal/ratelimit"
 )
 
 const (
@@ -39,7 +42,11 @@ type PolicyInput struct {
 	UserAttributes  map[string]any        `json:"userAttributes"`
 	ClientMetadata  map[string]string     `json:"clientMetadata"`
 	PhoneNumberData *PhoneNumber          `json:"phoneNumberData"`
-	History         PolicyHistory         `json:"history"`
+	// History is set when the SMS history table is configured.
+	History *PolicyHistory `json:"history,omitempty"`
+	// RateLimit is set when rate limiting is enabled. Throttled SMS never
+	// reach the policy, but the policy can deny on these values.
+	RateLimit *ratelimit.Result `json:"rateLimit,omitempty"`
 }
 
 // PolicyHistory summarizes recent SMS to the destination.
@@ -49,8 +56,9 @@ type PolicyHistory struct {
 	RecentAttempts int `json:"recentAttempts"`
 }
 
-// NewPolicyInput builds the policy input for an event.
-func NewPolicyInput(e *cognito.Event, phone *PhoneNumber, recentAttempts int) PolicyInput {
+// NewPolicyInput builds the policy input for an event. history and rl are
+// nil when the history table or rate limiting is disabled.
+func NewPolicyInput(e *cognito.Event, phone *PhoneNumber, history *PolicyHistory, rl *ratelimit.Result) PolicyInput {
 	in := PolicyInput{
 		Trigger:         e.TriggerSource,
 		UserPoolID:      e.UserPoolID,
@@ -60,7 +68,8 @@ func NewPolicyInput(e *cognito.Event, phone *PhoneNumber, recentAttempts int) Po
 		UserAttributes:  e.Request.UserAttributes,
 		ClientMetadata:  e.Request.ClientMetadata,
 		PhoneNumberData: phone,
-		History:         PolicyHistory{RecentAttempts: recentAttempts},
+		History:         history,
+		RateLimit:       rl,
 	}
 	if in.UserAttributes == nil {
 		in.UserAttributes = map[string]any{}
@@ -87,12 +96,21 @@ type Decision struct {
 	} `json:"allow"`
 }
 
+// RateLimiter decides whether an SMS may be sent. Check never fails; store
+// errors resolve to a fail-open or fail-closed decision.
+type RateLimiter interface {
+	Check(ctx context.Context, req ratelimit.Request) *ratelimit.Result
+}
+
 // Config holds the sender's dependencies and settings.
 type Config struct {
 	Policy    *policy.Engine
 	Decrypter decrypt.Decrypter
 	Publisher Publisher
-	History   HistoryStore
+	// RateLimiter is optional; nil disables rate limiting.
+	RateLimiter RateLimiter
+	// History is optional; nil disables the history and input.history.
+	History HistoryStore
 	// HistoryTTL is how long history records are kept.
 	HistoryTTL time.Duration
 	// ThrottlePeriod is the window input.history.recentAttempts counts over.
@@ -106,7 +124,7 @@ type Sender struct {
 	cfg Config
 }
 
-// New returns a sender. All dependencies are required.
+// New returns a sender. Policy, Decrypter, and Publisher are required.
 func New(cfg Config) (*Sender, error) {
 	switch {
 	case cfg.Policy == nil:
@@ -115,9 +133,7 @@ func New(cfg Config) (*Sender, error) {
 		return nil, errors.New("sms sender: decrypter is required")
 	case cfg.Publisher == nil:
 		return nil, errors.New("sms sender: publisher is required")
-	case cfg.History == nil:
-		return nil, errors.New("sms sender: history store is required")
-	case cfg.HistoryTTL <= 0 || cfg.ThrottlePeriod <= 0:
+	case cfg.History != nil && (cfg.HistoryTTL <= 0 || cfg.ThrottlePeriod <= 0):
 		return nil, errors.New("sms sender: history ttl and throttle period must be positive")
 	}
 	if cfg.Now == nil {
@@ -126,9 +142,9 @@ func New(cfg Config) (*Sender, error) {
 	return &Sender{cfg: cfg}, nil
 }
 
-// Handle processes one event. An invalid phone number or a policy denial is
-// logged and returns nil; policy, decryption, and publish failures return an
-// error so Lambda retries.
+// Handle processes one event. An invalid phone number, a throttle, or a
+// policy denial is logged and returns nil; policy, decryption, and publish
+// failures return an error so Lambda retries.
 func (s *Sender) Handle(ctx context.Context, e *cognito.Event) error {
 	rawPhone := e.Attribute("phone_number")
 	phone, err := ParsePhoneNumber(rawPhone)
@@ -138,11 +154,29 @@ func (s *Sender) Handle(ctx context.Context, e *cognito.Event) error {
 		return nil //nolint:nilerr // see above
 	}
 
-	now := s.cfg.Now()
-	s.recordAttempt(ctx, e, phone, now)
-	attempts := s.recentAttempts(ctx, phone, now)
+	// rate limits run first, so throttled SMS aren't recorded in the history
+	var rl *ratelimit.Result
+	if s.cfg.RateLimiter != nil {
+		rl = s.cfg.RateLimiter.Check(ctx, ratelimit.Request{
+			Trigger:        e.TriggerSource,
+			Destination:    phone.Number,
+			UserName:       e.UserName,
+			UserAttributes: e.Request.UserAttributes,
+			Code:           e.Request.Code,
+		})
+		if !rl.Allowed() {
+			return nil
+		}
+	}
 
-	d, err := policy.Eval[Decision](ctx, s.cfg.Policy, NewPolicyInput(e, phone, attempts))
+	var history *PolicyHistory
+	if s.cfg.History != nil {
+		now := s.cfg.Now()
+		s.recordAttempt(ctx, e, phone, now)
+		history = &PolicyHistory{RecentAttempts: s.recentAttempts(ctx, phone, now)}
+	}
+
+	d, err := policy.Eval[Decision](ctx, s.cfg.Policy, NewPolicyInput(e, phone, history, rl))
 	if err != nil {
 		return fmt.Errorf("sms policy: %w", err)
 	}
@@ -154,7 +188,6 @@ func (s *Sender) Handle(ctx context.Context, e *cognito.Event) error {
 	if action == policy.ActionDeny {
 		slog.InfoContext(ctx, "sms denied by policy",
 			"phone_masked", logging.MaskPhone(phone.Number),
-			"recent_attempts", attempts,
 			"reason", cmp.Or(d.Reason, d.Block.Reason, "not provided"),
 		)
 		return nil

@@ -69,7 +69,7 @@ func (s *Sender) Handle(ctx context.Context, e *cognito.Event) error {
 	if s.cfg.RateLimiter != nil {
 		rl = s.cfg.RateLimiter.Check(ctx, ratelimit.Request{
 			Trigger:        e.TriggerSource,
-			Email:          to,
+			Destination:    to,
 			UserName:       e.UserName,
 			UserAttributes: e.Request.UserAttributes,
 			Code:           e.Request.Code,

@@ -11,17 +11,26 @@ existing policies and tables keep working.
 1. The `phone_number` attribute is parsed with libphonenumber metadata. A
    number that can't be parsed or doesn't map to a country is logged and
    dropped.
-2. The attempt is saved to the history table, then the attempts to that phone
-   number within `APP_SMS_THROTTLE_PERIOD` are counted, including this one.
-3. The policy evaluates the event and returns `allow` with the message, or
+2. If [rate limiting](rate-limiting.md) is enabled
+   (`APP_SMS_RATE_LIMIT_ENABLED`), the SMS is counted against the limits for
+   its number, user, and class, and dropped when a limit is exceeded.
+3. If the history table is configured (`APP_SMS_HISTORY_TABLE_NAME`), the
+   attempt is saved, then the attempts to that phone number within
+   `APP_SMS_THROTTLE_PERIOD` are counted, including this one.
+4. The policy evaluates the event and returns `allow` with the message, or
    `deny` (or `block`) with a reason.
-4. If allowed, the code is decrypted with KMS and replaces the first `{####}`
+5. If allowed, the code is decrypted with KMS and replaces the first `{####}`
    in the message.
-5. The message is published with `sns:Publish`.
+6. The message is published with `sns:Publish`.
 
-History errors are logged and don't stop the send (the count is `0`). Invalid
-phone numbers and policy blocks return success, so Lambda doesn't retry them;
-policy, decryption, and SNS errors return an error, so Lambda retries.
+History errors are logged and don't stop the send (the count is `0`).
+Invalid phone numbers, throttles, and policy denials return success, so
+Lambda doesn't retry them; policy, decryption, and SNS errors return an
+error, so Lambda retries.
+
+Use rate limiting to protect against SMS pumping and code flooding; see
+[rate limiting](rate-limiting.md#rate-limits-the-sms-history-and-policies)
+for how it compares with the history table.
 
 ## Policy
 
@@ -35,7 +44,8 @@ example.
 
 ## History table
 
-The table uses the same layout as the Node.js sender:
+The history table is optional. Without it, the policy input has no
+`history`. The table uses the same layout as the Node.js sender:
 
 | Key                                     | Attributes                                       |
 | --------------------------------------- | ------------------------------------------------ |
@@ -50,10 +60,17 @@ queried by phone number.
 
 ## IAM permissions
 
-```json
+```jsonc
 [
   { "Effect": "Allow", "Action": "sns:Publish", "Resource": "*" },
   { "Effect": "Allow", "Action": "kms:Decrypt", "Resource": "arn:aws:kms:us-east-1:123456789012:key/EXAMPLE" },
+  // with rate limiting
+  {
+    "Effect": "Allow",
+    "Action": ["dynamodb:UpdateItem", "dynamodb:PutItem", "dynamodb:BatchGetItem"],
+    "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/example-rate-limit"
+  },
+  // with the history table
   {
     "Effect": "Allow",
     "Action": ["dynamodb:PutItem", "dynamodb:Query"],

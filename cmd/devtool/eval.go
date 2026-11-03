@@ -134,7 +134,7 @@ func evalEvent(ctx context.Context, e *cognito.Event, res *evalResult, emailEngi
 			res.Outcome = "dropped: invalid phone number"
 			return
 		}
-		in := sms.NewPolicyInput(e, phone, attempts)
+		in := sms.NewPolicyInput(e, phone, &sms.PolicyHistory{RecentAttempts: attempts}, nil)
 		res.Input = in
 
 		d, err := policy.Eval[sms.Decision](ctx, smsEngine, in)
