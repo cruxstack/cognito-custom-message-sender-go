@@ -65,3 +65,28 @@ func TestEvaluate_UndefinedResult(t *testing.T) {
 		t.Error("expected error for undefined result")
 	}
 }
+
+const testPolicyV0 = `
+package mock_policy
+
+default allow = false
+
+allow {
+	input.user == "admin"
+}
+`
+
+func TestPreparePolicy_RegoVersion(t *testing.T) {
+	if _, err := PreparePolicy(context.Background(), testPolicyV0, "data.mock_policy.allow"); err == nil {
+		t.Error("rego v0 syntax should fail to parse as v1")
+	}
+
+	pp, err := PreparePolicy(context.Background(), testPolicyV0, "data.mock_policy.allow", WithRegoV0())
+	if err != nil {
+		t.Fatalf("PreparePolicy(WithRegoV0) error = %v", err)
+	}
+	got, err := Evaluate[bool](context.Background(), pp, map[string]any{"user": "admin"})
+	if err != nil || !*got {
+		t.Errorf("Evaluate() = %v, %v; want true", got, err)
+	}
+}

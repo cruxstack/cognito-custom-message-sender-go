@@ -31,3 +31,13 @@ func TestPassthrough(t *testing.T) {
 		t.Errorf("Decrypt() = (%q, %v), want (123456, nil)", got, err)
 	}
 }
+
+func TestNewDecrypter_DebugMockKey(t *testing.T) {
+	d, err := NewDecrypter(MockKeyID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.(Passthrough); !ok {
+		t.Errorf("NewDecrypter() = %T, want Passthrough in debug mode with the mock key", d)
+	}
+}
