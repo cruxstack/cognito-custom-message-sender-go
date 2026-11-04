@@ -57,9 +57,12 @@ sender in dry-run mode with the settings in `.env` (copy `.env.example`).
 
 Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat:`, `fix:`, `docs:`, ...); a check enforces it. Each merge to `main` is
-tagged and released automatically: `fix:` and similar bump the patch
-version, `feat:` the minor version, and a `!` (`feat!:`) or a
-`BREAKING CHANGE:` footer the major version. Releases attach
+tagged and released automatically: `fix:`, `chore:`, `docs:`, `test:`, and
+`ci:` bump the patch version; `feat:`, `refactor:`, and other types bump the
+minor version; and a breaking change, marked with `!` (`feat!:`, `fix!:`,
+`refactor!:`) or a `BREAKING CHANGE:` footer, bumps the major version. A `!`
+on `chore`, `docs`, `test`, or `ci` is still released as a patch, so use one
+of the other types for breaking changes. Releases attach
 `bootstrap_linux_arm64.zip`, `bootstrap_linux_amd64.zip`, and
 `checksums.txt`.
 
