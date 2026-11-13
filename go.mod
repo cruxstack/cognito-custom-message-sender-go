@@ -12,7 +12,7 @@ require (
 	github.com/chainifynet/aws-encryption-sdk-go v0.5.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nyaruka/phonenumbers v1.8.1
-	github.com/open-policy-agent/opa v1.22.0
+	github.com/open-policy-agent/opa v1.22.2
 )
 
 require (
